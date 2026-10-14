@@ -46,6 +46,28 @@ reproduction should sit far below them. On real data the comparison tool reads
 0.00 mm for a file against itself and ~170 mm between two different trials of
 the same athlete, so it clearly separates the two cases.
 
+### Result on a real swing (Quinn_1_60fps, 2 cameras)
+
+- Markers: max difference 0.0005 mm over 63 markers × 343 frames.
+- Joint angles: median RMSE 0.14° over 33 coordinates.
+- The only coordinates that exceed the tolerance are the lead (left) arm's,
+  for about 10 frames (t ≈ 4.18–4.35 s) right after the elbow reaches full
+  extension. The cause is not the OpenSim version: Stanford's own image
+  (`stanfordnmbl/opensim-python:4.3`, OpenSim 4.3.1) gives the same result
+  as 4.6. At 0° the elbow sits on its joint limit, and the markers can't tell
+  which way the arm leaves it. IK then jumps branches in a single frame
+  (OpenCap: 2° → 67°; ours: 1° → 101°, 10 frames later). Both jumps are
+  physically impossible. **Treat lead-elbow and forearm angles and velocities
+  in the frames after full extension as unreliable in OpenCap's output as
+  well as ours.**
+
+To rerun IK with Stanford's OpenSim version (Docker, no Python needed):
+
+```bash
+docker run --rm -v "$PWD":"$PWD" -w "$PWD" stanfordnmbl/opensim-python:4.3 \
+    opensim-cmd -o error run-tool path/to/Setup_IK_<trial>.xml
+```
+
 Dropping `--reuse-opencap-keypoints` runs MMPose pose detection too. That is the
 step that needs an NVIDIA GPU, and it is the second half of the acceptance test.
 
