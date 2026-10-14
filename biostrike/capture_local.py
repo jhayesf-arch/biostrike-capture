@@ -189,9 +189,51 @@ def find_references(session_dir: str, trial: str) -> dict:
 
 # ── Pipeline call ──────────────────────────────────────────────────────────
 
+def offline_environment() -> None:
+    """Make importing upstream code safe without a Stanford account.
+
+    utils.py and utilsChecker.py call getToken() at IMPORT time, which prompts
+    for an app.opencap.ai username and password and posts them to
+    api.opencap.ai — before any local processing starts. getToken() returns
+    early when API_TOKEN is set, so a placeholder skips the prompt. The token
+    is only used by requests to Stanford's API (calibration's
+    computeAverageIntrinsics), which this runner never reaches because it
+    reuses the session's calibration.
+
+    API_URL is pointed at a reserved, unresolvable name, so if a future
+    upstream change does make a request on this path it fails at once rather
+    than silently reaching Stanford's servers.
+    """
+    os.environ.setdefault('API_TOKEN', 'offline-biostrike')
+    os.environ.setdefault('API_URL', 'http://opencap-api.invalid/')
+
+
+def compat_shims() -> None:
+    """Bridge library APIs that moved after upstream pinned its versions.
+
+    Upstream targets SciPy < 1.13 and NumPy 1.x. OpenSim's pip wheel requires
+    NumPy >= 2.1, which in turn requires SciPy >= 1.13, where
+    scipy.signal.gaussian was removed in favour of scipy.signal.windows.gaussian
+    (same function). Aliasing it here keeps upstream files unmodified.
+    """
+    import scipy.signal
+    if not hasattr(scipy.signal, 'gaussian'):
+        from scipy.signal.windows import gaussian
+        scipy.signal.gaussian = gaussian
+
+
 def run_pipeline(workdir: str, session_name: str, trial: str, scale: bool) -> None:
     """Call upstream main.main() — imported lazily, since it pulls in TensorFlow,
     OpenSim and OpenCV, none of which the preparation steps need."""
+    offline_environment()
+    compat_shims()
+    # Upstream runs OpenSim tools by shelling out to `opensim-cmd`, which the
+    # pip wheel does not ship. Fall back to biostrike/bin/opensim-cmd (same
+    # setup file, run through the Python API), with this interpreter first on
+    # PATH so the shim imports the same opensim.
+    if shutil.which('opensim-cmd') is None:
+        os.environ['PATH'] = os.pathsep.join(
+            [os.path.join(HERE, 'bin'), os.path.dirname(sys.executable), os.environ.get('PATH', '')])
     if REPO not in sys.path:
         sys.path.insert(0, REPO)
     from main import main as opencap_main

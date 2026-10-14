@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Minimal stand-in for OpenSim's `opensim-cmd run-tool <setup.xml>`.
+
+Upstream (utilsOpenSim.runIKTool and friends) writes a tool setup file with the
+OpenSim Python API, then executes it by shelling out to the `opensim-cmd`
+binary. Conda installs ship that binary; the pip wheel (opensim==4.6) does not.
+This runs the same setup file through the Python API instead.
+
+capture_local.py puts this on PATH only when no real opensim-cmd is found, so a
+conda install keeps using the real one. Supports: [-o LEVEL] run-tool SETUP.xml
+"""
+import sys
+import xml.etree.ElementTree as ET
+
+import opensim
+
+TOOLS = {
+    'InverseKinematicsTool': opensim.InverseKinematicsTool,
+    'InverseDynamicsTool': opensim.InverseDynamicsTool,
+    'ScaleTool': opensim.ScaleTool,
+    'AnalyzeTool': opensim.AnalyzeTool,
+}
+
+
+def main(argv):
+    args = list(argv)
+    if args[:1] == ['-o'] and len(args) >= 2:
+        opensim.Logger.setLevelString(args[1])
+        args = args[2:]
+    if len(args) != 2 or args[0] != 'run-tool':
+        sys.stderr.write('usage: opensim-cmd [-o LEVEL] run-tool SETUP.xml\n')
+        return 2
+    setup = args[1]
+    root = ET.parse(setup).getroot()
+    tag = next((child.tag for child in root if child.tag in TOOLS), None)
+    if tag is None:
+        sys.stderr.write(f'opensim-cmd shim: no supported tool in {setup}\n')
+        return 2
+    ok = TOOLS[tag](setup).run()
+    return 0 if ok in (None, True) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
