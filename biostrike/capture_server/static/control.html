@@ -18,6 +18,7 @@
       <div>
         <p>Scan with each phone's camera, or open:</p>
         <code id="join"></code>
+        <p class="hint bad" id="join-warn"></p>
         <p class="hint">Mount phones upright (portrait) on tripods, about 3 m from the hitter
           and 30–45° apart, both seeing the whole body.</p>
       </div>
@@ -70,8 +71,8 @@ fetch('/api/config').then(r => r.json()).catch(() => ({})).then(cfg => {
   const base = (local && cfg.public_url) ? cfg.public_url : location.origin;
   const joinUrl = base + '/join/' + sid;
   document.getElementById('join').textContent = joinUrl;
-  if (local && !cfg.public_url) document.getElementById('join').textContent +=
-    '  — phones cannot open a localhost link: restart the server with CAPTURE_PUBLIC_URL set to the tunnel link.';
+  if (local && !cfg.public_url) document.getElementById('join-warn').textContent =
+    'Phones cannot open a localhost link. Start the capture with: python -m biostrike.capture_server.run';
   const img = document.createElement('img');
   img.src = `/api/sessions/${sid}/qr.svg`; img.width = 180; img.height = 180; img.alt = 'Join QR code';
   img.onerror = () => { document.getElementById('qr').textContent = 'QR unavailable; send the link below to each phone.'; };
