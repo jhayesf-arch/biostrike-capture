@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Capture Control</title>
 <link rel="stylesheet" href="/static/style.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 <main>
@@ -73,8 +72,10 @@ fetch('/api/config').then(r => r.json()).catch(() => ({})).then(cfg => {
   document.getElementById('join').textContent = joinUrl;
   if (local && !cfg.public_url) document.getElementById('join').textContent +=
     '  — phones cannot open a localhost link: restart the server with CAPTURE_PUBLIC_URL set to the tunnel link.';
-  try { new QRCode(document.getElementById('qr'), {text: joinUrl, width: 168, height: 168}); }
-  catch (e) { document.getElementById('qr').textContent = 'QR unavailable; use the link.'; }
+  const img = document.createElement('img');
+  img.src = `/api/sessions/${sid}/qr.svg`; img.width = 180; img.height = 180; img.alt = 'Join QR code';
+  img.onerror = () => { document.getElementById('qr').textContent = 'QR unavailable; send the link below to each phone.'; };
+  document.getElementById('qr').appendChild(img);
 });
 
 let state = null, swingN = 1;

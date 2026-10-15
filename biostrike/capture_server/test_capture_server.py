@@ -140,6 +140,33 @@ def test_checkerboard_size_reaches_session_metadata():
                                               'square_mm': 2}).status_code == 400
 
 
+def test_passcode_only_asked_of_internet_visitors():
+    body = {'subjectID': 'Q', 'mass_kg': 80, 'height_m': 1.8}
+    local = TestClient(server.app, client=('127.0.0.1', 50000))
+    old = server.PASSCODE
+    server.PASSCODE = 'abc123'
+    try:
+        assert local.post('/api/sessions', json=body).status_code == 200
+        # Through the tunnel: also from 127.0.0.1, but stamped by Cloudflare.
+        r = local.post('/api/sessions', json=body, headers={'CF-Connecting-IP': '203.0.113.9'})
+        assert r.status_code == 403
+        assert client.post('/api/sessions', json=body).status_code == 403
+        assert client.post('/api/sessions', json={**body, 'passcode': 'abc123'}).status_code == 200
+        assert local.get('/api/config').json()['passcode_required'] is False
+        assert client.get('/api/config').json()['passcode_required'] is True
+    finally:
+        server.PASSCODE = old
+
+
+def test_tunnel_link_is_read_from_cloudflared_output():
+    import run
+    lines = ['INF Requesting new quick Tunnel on trycloudflare.com...',
+             'INF |  Your quick Tunnel has been created! Visit it at  |',
+             'INF |  https://won-door-murray-factors.trycloudflare.com   |']
+    assert run.find_tunnel_url(iter(lines)) == 'https://won-door-murray-factors.trycloudflare.com'
+    assert run.find_tunnel_url(iter(['nothing here'])) is None
+
+
 def test_control_actions_need_the_control_key():
     s = _new_session()
     r = client.post(f"/api/sessions/{s['sid']}/trials", json={'key': 'wrong', 'kind': 'calibration'})

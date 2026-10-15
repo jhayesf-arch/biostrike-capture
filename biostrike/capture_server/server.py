@@ -25,7 +25,9 @@ or a Cloudflare tunnel.
 
 Access: the camera link only lets a phone join and upload its own clips. The
 control link carries a separate key needed to start and stop recordings. Set
-CAPTURE_PASSCODE to require a passcode to create sessions at all.
+CAPTURE_PASSCODE to require a passcode to create sessions from anywhere but
+the server machine itself. `python -m biostrike.capture_server.run` sets one up
+automatically, together with the tunnel.
 """
 
 from __future__ import annotations
@@ -243,9 +245,34 @@ def models():
     return available_models()
 
 
+def is_local_request(request: Request) -> bool:
+    """True only for a browser on the server machine itself.
+
+    Tunnel traffic also arrives from 127.0.0.1 (cloudflared connects locally),
+    but Cloudflare always stamps it with CF-Connecting-IP, overwriting any
+    value a client sends, so its presence marks a request from the internet.
+    """
+    host = request.client.host if request.client else ''
+    return host in ('127.0.0.1', '::1') and 'cf-connecting-ip' not in request.headers
+
+
 @app.get('/api/config')
-def config():
-    return {'public_url': PUBLIC_URL, 'passcode_required': bool(PASSCODE)}
+def config(request: Request):
+    return {'public_url': PUBLIC_URL,
+            'passcode_required': bool(PASSCODE) and not is_local_request(request)}
+
+
+@app.get('/api/sessions/{sid}/qr.svg')
+def join_qr(sid: str, request: Request):
+    """QR code for the phones' join link, drawn here so the control page
+    needs nothing from outside sites."""
+    from fastapi.responses import Response
+    import segno
+    _session(sid)
+    base = PUBLIC_URL if (PUBLIC_URL and is_local_request(request)) else str(request.base_url).rstrip('/')
+    buf = __import__('io').BytesIO()
+    segno.make(f'{base}/join/{sid}', error='m').save(buf, kind='svg', scale=6, border=2)
+    return Response(buf.getvalue(), media_type='image/svg+xml')
 
 
 @app.get('/api/time')
@@ -256,7 +283,8 @@ def server_time():
 @app.post('/api/sessions')
 async def create_session(request: Request):
     body = await request.json()
-    if PASSCODE and not secrets.compare_digest(str(body.get('passcode', '')), PASSCODE):
+    if (PASSCODE and not is_local_request(request)
+            and not secrets.compare_digest(str(body.get('passcode', '')), PASSCODE)):
         raise HTTPException(403, 'Wrong passcode.')
     subject = str(body.get('subjectID') or 'athlete').strip()
     if not TRIAL_RE.match(subject):

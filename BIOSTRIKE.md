@@ -88,9 +88,16 @@ brew install ffmpeg
 uvicorn biostrike.capture_server.server:app --port 8000
 ```
 
-In a second terminal, `cloudflared tunnel --url http://localhost:8000` (after
-`brew install cloudflared`) prints a free `https://…trycloudflare.com` link that
-the phones can open. Commands here carry no trailing `# comments`: macOS's zsh
+Or do it all in one command (after `brew install cloudflared`):
+
+```bash
+python -m biostrike.capture_server.run
+```
+
+This starts the server and a free `https://…trycloudflare.com` link for the
+phones, waits until the link answers, keeps the Mac awake, and opens the control
+page at `http://localhost:8000`. It prints a passcode, which is asked only of
+browsers coming in over the internet. Ctrl+C stops everything. Commands here carry no trailing `# comments`: macOS's zsh
 passes them to the command as arguments.
 
 1. **Home page:** enter the athlete and the checkerboard size, then create a session.

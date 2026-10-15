@@ -35,6 +35,10 @@
   </form>
 </main>
 <script>
+fetch('/api/config').then(r => r.json()).then(c => {
+  if (!c.passcode_required) document.getElementById('show-pc').hidden = true;
+  else document.getElementById('pc-wrap').hidden = false;
+}).catch(() => {});
 document.getElementById('show-pc').onclick = () => { document.getElementById('pc-wrap').hidden = false; };
 document.getElementById('f').onsubmit = async (e) => {
   e.preventDefault();
