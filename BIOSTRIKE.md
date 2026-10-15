@@ -150,6 +150,21 @@ ends live sessions.
 - Viewed exactly head-on, a flat board is ambiguous: the two candidate solutions
   sit about ±240 mm either side of the truth at 1.5 m. Angle the phones to the board.
 
+### First real-phone session (iPhone 14 + iPhone 11 Pro, Safari)
+
+- Recording, upload and conversion worked on both phones. Safari tagged some
+  clips as rotated 180 deg; they still came out upright.
+- The phones' measured clocks were within ±10–14 ms (round trips of 20–28 ms).
+  Each phone reported starting within 2 ms of the other.
+- **Frame rate:** the iPhone 14 gave 60 fps; the iPhone 11 Pro gave only 30 fps
+  when the page merely asked for 60. The page now requires ≥55 fps first.
+- **Calibration:** OpenCap's code found the board in both cameras at about 3 m.
+  But each square was only ~10 px, and in one view the board was at the frame
+  edge, so the two pose solutions disagreed (cameras 30° vs 65° apart). Use the
+  board at 1.5–2 m, centred where the hitter stands, or print bigger squares.
+- The neutral pose had been recorded before calibration, with one phone aimed
+  elsewhere. The server now requires Calibrate first, as OpenCap does.
+
 ### Not yet tested on real iPhones
 
 - **Frame rate.** Browsers may give 30 fps instead of 60, and the control page

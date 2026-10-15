@@ -341,7 +341,9 @@ async def start_trial(sid: str, request: Request):
     ready = [d for d in s.devices.values() if d.ws is not None and d.model and d.clock_offset_s is not None]
     if len(ready) < 2:
         raise HTTPException(409, 'Need at least 2 phones connected, each with its model chosen.')
-    if kind == 'dynamic' and not _calibrated(s):
+    # Same order OpenCap enforces: the neutral pose and the swings are only
+    # usable from cameras that were calibrated where they now stand.
+    if kind != 'calibration' and not _calibrated(s):
         raise HTTPException(409, 'Calibrate the cameras first.')
     t = Trial(name=name, kind=kind, start_at=time.time() + START_LEAD_S,
               devices=[d.device_id for d in ready])

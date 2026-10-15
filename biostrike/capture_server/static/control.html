@@ -105,7 +105,7 @@ function render() {
   const ready = devs.filter(d => d.online && d.model && d.clock_rtt_ms != null).length;
   $('dev-hint').textContent = ready >= 2 ? `${ready} phones ready.` : 'Need at least 2 phones connected with their model chosen.';
   const lowFps = devs.some(d => d.settings && d.settings.frameRate && d.settings.frameRate < 59);
-  if (lowFps) $('dev-hint').textContent += ' One or more phones record below 60 fps in the browser — fast swing phases will blur between frames.';
+  if (lowFps) $('dev-hint').textContent += ' One or more phones record below 60 fps in this browser. Its frames get doubled to 60 fps, so it sees half as much of the swing — use phones that show 60 fps.';
 
   const trials = state.trials;
   const recording = trials.find(t => t.status === 'recording');
@@ -117,7 +117,7 @@ function render() {
   }).join('') || '<tr><td colspan="3" class="muted">Nothing recorded yet.</td></tr>';
   const canRec = ready >= 2 && !recording;
   $('b-cal').disabled = !canRec;
-  $('b-neu').disabled = !canRec;
+  $('b-neu').disabled = !canRec || !(cal && cal.status === 'ready');
   $('b-rec').disabled = !canRec || !(cal && cal.status === 'ready');
   $('b-stop').disabled = !recording;
   const firstDyn = trials.find(t => t.kind === 'dynamic' && t.status === 'ready');
