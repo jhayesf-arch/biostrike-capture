@@ -11,7 +11,9 @@ normalize_video re-encodes it so the pipeline sees exactly what it would get
 from OpenCap's app:
   - trimmed to the session's common start time
   - stored as 1280x720 landscape, tagged to display upright in portrait
-  - constant 60 fps (browsers record variable frame rate)
+  - constant frame rate at the phone's real rate: 30/60 from a browser,
+    up to 120/240 from the native app's slow-motion modes. Never raised:
+    doubling frames would only fake detail the camera never saw.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import shutil
 import subprocess
 import tempfile
 
-TARGET_FPS = 60
+STANDARD_FPS = (24, 25, 30, 50, 60, 100, 120, 240)
 TARGET_DISPLAY_W, TARGET_DISPLAY_H = 720, 1280      # portrait, as displayed
 
 
@@ -66,10 +68,29 @@ def probe(path: str) -> dict:
             'rotation': rotation}
 
 
+def nominal_fps(measured: float) -> int:
+    """Snap a measured average rate (59.69, 29.97, 239.4…) to the rate the
+    camera was running at. Browsers record variable frame rate, so the average
+    wanders a little around the nominal value."""
+    if measured <= 0:
+        raise VideoError('Could not read the frame rate of the recording.')
+    best = min(STANDARD_FPS, key=lambda f: abs(f - measured))
+    return best if abs(best - measured) / best < 0.08 else int(round(measured))
+
+
 def normalize_video(src: str, dst: str, trim_start_s: float = 0.0,
-                    duration_s: float | None = None) -> dict:
-    """Write dst (.mov) in OpenCap's layout. Returns the source probe."""
+                    duration_s: float | None = None, fps: int | None = None) -> dict:
+    """Write dst (.mov) in OpenCap's layout. Returns the source probe.
+
+    fps defaults to the source's own nominal rate. A lower fps keeps every
+    n-th frame, used when cameras ran at different rates; a higher one is
+    refused rather than inventing frames."""
     info = probe(src)
+    source_fps = nominal_fps(info['fps'])
+    fps = fps or source_fps
+    if fps > source_fps:
+        raise VideoError(f'Cannot raise {source_fps} fps to {fps} fps without inventing frames.')
+    info['nominal_fps'], info['output_fps'] = source_fps, fps
     w, h = info['display_w'], info['display_h']
     if w > h:
         raise VideoError('This phone recorded in landscape. Mount phones upright '
@@ -85,7 +106,7 @@ def normalize_video(src: str, dst: str, trim_start_s: float = 0.0,
         stage = os.path.join(tmp, 'stage.mov')
         # Decoding applies the source's own rotation, so frames arrive as
         # displayed (portrait). Scale to 720x1280 (same field of view, so the
-        # intrinsics still hold), resample to constant 60 fps, then turn them
+        # intrinsics still hold), set a constant frame rate, then turn them
         # 90 deg counter-clockwise into the landscape storage iPhones use.
         cmd = [ff, '-v', 'error', '-y']
         if trim_start_s > 0:
@@ -94,12 +115,12 @@ def normalize_video(src: str, dst: str, trim_start_s: float = 0.0,
         if duration_s:
             cmd += ['-t', f'{duration_s:.4f}']
         cmd += ['-an', '-vf',
-                f'scale={TARGET_DISPLAY_W}:{TARGET_DISPLAY_H},fps={TARGET_FPS},transpose=2',
+                f'scale={TARGET_DISPLAY_W}:{TARGET_DISPLAY_H},fps={fps},transpose=2',
                 # A keyframe every second, as in OpenCap's iPhone files: the
                 # calibration step grabs its checkerboard image with
                 # `-skip_frame nokey`, so it can only see keyframes.
                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '17',
-                '-g', str(TARGET_FPS), stage]
+                '-g', str(fps), stage]
         _run(cmd)
         # Tag it to display upright, exactly as OpenCap's .mov files are:
         # display matrix -90 deg plus the QuickTime orientation the pipeline

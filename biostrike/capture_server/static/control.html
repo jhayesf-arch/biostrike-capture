@@ -45,8 +45,15 @@
 
   <section class="card">
     <h2>4 · Swings</h2>
-    <label for="tname">Trial name</label>
-    <input id="tname" pattern="[A-Za-z0-9_\-]{1,48}">
+    <div class="row">
+      <div><label for="tname">Trial name</label>
+        <input id="tname" pattern="[A-Za-z0-9_\-]{1,48}"></div>
+      <div><label for="fps">Frame rate</label>
+        <select id="fps"><option value="60">60 fps</option><option value="120">120 fps (app)</option>
+          <option value="240">240 fps (app, bright light)</option></select></div>
+    </div>
+    <p class="hint">120 and 240 fps need the Biostrike iPhone app; phones in the browser record at
+      up to 60 and the slowest camera sets the rate for all.</p>
     <div class="actions">
       <button id="b-rec" class="rec">● Record</button>
       <button id="b-stop" disabled>■ Stop</button>
@@ -113,7 +120,9 @@ function render() {
   $('trials').querySelector('tbody').innerHTML = trials.map(t => {
     const cls = t.status === 'ready' ? 'ok' : t.status === 'failed' ? 'bad' : 'warn';
     const extra = t.status === 'uploading' ? ` (${t.uploaded.length}/${t.devices.length})` : '';
-    return `<tr><td>${esc(t.name)}</td><td>${esc(t.kind)}</td><td class="${cls}">${esc(t.status)}${extra}${t.error ? ' — ' + esc(t.error) : ''}</td></tr>`;
+    const rate = t.fps ? ` · ${t.fps} fps` : '';
+    const warn = t.warning ? `<div class="warn">${esc(t.warning)}</div>` : '';
+    return `<tr><td>${esc(t.name)}</td><td>${esc(t.kind)}</td><td class="${cls}">${esc(t.status)}${extra}${rate}${t.error ? ' — ' + esc(t.error) : ''}${warn}</td></tr>`;
   }).join('') || '<tr><td colspan="3" class="muted">Nothing recorded yet.</td></tr>';
   const canRec = ready >= 2 && !recording;
   $('b-cal').disabled = !canRec;
@@ -141,13 +150,13 @@ async function post(path, body) {
   return j;
 }
 async function timed(kind, seconds) {
-  const t = await post(`/api/sessions/${sid}/trials`, {kind});
+  const t = await post(`/api/sessions/${sid}/trials`, {kind, fps: +$('fps').value});
   if (t) setTimeout(() => post(`/api/sessions/${sid}/trials/${t.name}/stop`, {}), (seconds + 1.5) * 1000);
 }
 $('b-cal').onclick = () => timed('calibration', 2);
 $('b-neu').onclick = () => timed('neutral', 3);
 $('b-rec').onclick = async () => {
-  const t = await post(`/api/sessions/${sid}/trials`, {kind: 'dynamic', name: $('tname').value.trim()});
+  const t = await post(`/api/sessions/${sid}/trials`, {kind: 'dynamic', name: $('tname').value.trim(), fps: +$('fps').value});
   if (t) { swingN += 1; $('tname').value = 'swing_' + swingN; }
 };
 $('b-stop').onclick = () => {

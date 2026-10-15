@@ -61,16 +61,17 @@ def _wait(sid, key, trial, status='ready', timeout=60):
     raise AssertionError(f'{trial} never reached {status}')
 
 
-def _record(s, ws_by_cam, welcome_by_cam, kind, name=None, offsets=(0.0, 0.12), seconds=3.0):
+def _record(s, ws_by_cam, welcome_by_cam, kind, name=None, offsets=(0.0, 0.12), seconds=3.0,
+            rates=(60, 60), fps=60):
     """Start, receive the start command on both phones, stop, upload."""
     r = client.post(f"/api/sessions/{s['sid']}/trials",
-                    json={'key': s['key'], 'kind': kind, 'name': name})
+                    json={'key': s['key'], 'kind': kind, 'name': name, 'fps': fps})
     assert r.status_code == 200, r.text
     trial = r.json()['name']
     starts = {}
     for cam, ws in ws_by_cam.items():
         m = json.loads(ws.receive_text())
-        assert m['type'] == 'start' and m['trial'] == trial
+        assert m['type'] == 'start' and m['trial'] == trial and m['fps'] == fps
         starts[cam] = m['at']
     assert len(set(starts.values())) == 1, 'every phone gets the same start time'
     r = client.post(f"/api/sessions/{s['sid']}/trials/{trial}/stop", json={'key': s['key']})
@@ -81,7 +82,7 @@ def _record(s, ws_by_cam, welcome_by_cam, kind, name=None, offsets=(0.0, 0.12), 
         for i, (cam, w) in enumerate(welcome_by_cam.items()):
             # Each phone actually started a little late, by a different amount.
             started = starts[cam] + offsets[i]
-            path = _clip(os.path.join(d, f'{cam}.mp4'), seconds=seconds)
+            path = _clip(os.path.join(d, f'{cam}.mp4'), seconds=seconds, rate=rates[i])
             with open(path, 'rb') as f:
                 r = client.post(f"/api/sessions/{s['sid']}/upload",
                                 data={'device_id': w['device_id'], 'token': w['token'],
@@ -109,17 +110,26 @@ def test_full_session_produces_opencap_layout():
         assert _record(s, wss, wel, 'calibration')['status'] == 'ready'
         assert _record(s, wss, wel, 'neutral')['status'] == 'ready'
         t = _record(s, wss, wel, 'dynamic', 'swing_1')
-        assert t['status'] == 'ready', t
+        assert t['status'] == 'ready' and t['fps'] == 60 and not t['warning'], t
+        # Native-app rates come through untouched.
+        t = _record(s, wss, wel, 'dynamic', 'swing_fast', rates=(120, 120), fps=120)
+        assert t['status'] == 'ready' and t['fps'] == 120, t
+        # A phone stuck at 30 fps: the 60 fps camera is reduced to match, and
+        # the slow one is never padded with duplicated frames.
+        t = _record(s, wss, wel, 'dynamic', 'swing_mixed', rates=(60, 30))
+        assert t['status'] == 'ready' and t['fps'] == 30, t
+        assert 'Cam1' in t['warning'] and '30 fps' in t['warning'], t
 
     folder = os.path.join(_TMP, 'Data', f"BiostrikeSession_{s['sid']}")
     meta = yaml.safe_load(open(os.path.join(folder, 'sessionMetadata.yaml')))
     assert meta['iphoneModel'] == {'Cam0': MODEL, 'Cam1': MODEL}
     assert meta['mass_kg'] == 81.6 and meta['checkerBoard']['squareSideLength_mm'] == 35.0
-    for trial in ('calibration', 'neutral', 'swing_1'):
+    for trial, rate in (('calibration', 60), ('neutral', 60), ('swing_1', 60),
+                        ('swing_fast', 120), ('swing_mixed', 30)):
         for cam in ('Cam0', 'Cam1'):
             p = os.path.join(folder, 'Videos', cam, 'InputMedia', trial, trial + '.mov')
             info = media.probe(p)
-            assert (info['display_w'], info['display_h'], info['fps']) == (720, 1280, 60.0), info
+            assert (info['display_w'], info['display_h'], info['fps']) == (720, 1280, rate), (trial, info)
     report = json.load(open(os.path.join(folder, 'Videos', 'swing_1_capture.json')))
     # Cam1 started 120 ms after Cam0, so Cam0 is trimmed by 120 ms and Cam1 not
     # at all, and both cover the same shared window.
@@ -183,6 +193,18 @@ def test_upload_rejects_unknown_phone_and_bad_names():
     assert r.status_code == 403
     r = client.post('/api/sessions', json={'subjectID': '../etc', 'mass_kg': 80, 'height_m': 1.8})
     assert r.status_code == 400
+
+
+def test_frame_rate_is_snapped_and_never_raised():
+    assert [media.nominal_fps(x) for x in (29.97, 59.69, 60.07, 119.4, 239.0)] == [30, 60, 60, 120, 240]
+    with tempfile.TemporaryDirectory() as d:
+        src = _clip(os.path.join(d, 's.mp4'), seconds=1, rate=30)
+        try:
+            media.normalize_video(src, os.path.join(d, 'o.mov'), fps=60)
+        except media.VideoError as e:
+            assert 'inventing frames' in str(e)
+        else:
+            raise AssertionError('30 fps was padded up to 60')
 
 
 def test_landscape_recording_is_refused_with_a_reason():

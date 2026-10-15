@@ -71,6 +71,9 @@ STOP_LEAD_S = 0.3
 ID_RE = re.compile(r'^[A-Za-z0-9_-]{8,64}$')
 TRIAL_RE = re.compile(r'^[A-Za-z0-9_-]{1,48}$')
 TRIAL_KINDS = ('calibration', 'neutral', 'dynamic')
+# Rates a trial can ask for. 120/240 need the native app (slow-motion camera
+# modes); browsers deliver at most 60 and the trial records what they give.
+CAPTURE_FPS = (60, 120, 240)
 
 # Apple identifiers that have deployed lens calibrations in CameraIntrinsics/.
 IPHONE_NAMES = {
@@ -143,10 +146,14 @@ class Trial:
     uploads: Dict[str, dict] = field(default_factory=dict)
     status: str = 'recording'          # recording → uploading → processing → ready | failed
     error: str = ''
+    requested_fps: int = 60
+    fps: Optional[int] = None          # rate the filed videos actually have
+    warning: str = ''
 
     def public(self) -> dict:
         return {'name': self.name, 'kind': self.kind, 'status': self.status, 'error': self.error,
-                'uploaded': sorted(self.uploads), 'devices': self.devices}
+                'uploaded': sorted(self.uploads), 'devices': self.devices,
+                'requested_fps': self.requested_fps, 'fps': self.fps, 'warning': self.warning}
 
 
 @dataclass
@@ -329,6 +336,12 @@ async def start_trial(sid: str, request: Request):
     body = await request.json()
     _require_key(s, body.get('key', ''))
     kind = body.get('kind', 'dynamic')
+    try:
+        requested_fps = int(body.get('fps', 60))
+    except (TypeError, ValueError):
+        requested_fps = 0
+    if requested_fps not in CAPTURE_FPS:
+        raise HTTPException(400, f'fps must be one of {CAPTURE_FPS}')
     if kind not in TRIAL_KINDS:
         raise HTTPException(400, f'kind must be one of {TRIAL_KINDS}')
     name = kind if kind != 'dynamic' else str(body.get('name') or '').strip()
@@ -346,11 +359,12 @@ async def start_trial(sid: str, request: Request):
     if kind != 'calibration' and not _calibrated(s):
         raise HTTPException(409, 'Calibrate the cameras first.')
     t = Trial(name=name, kind=kind, start_at=time.time() + START_LEAD_S,
-              devices=[d.device_id for d in ready])
+              devices=[d.device_id for d in ready], requested_fps=requested_fps)
     s.trials[name] = t           # re-recording calibration/neutral replaces it
     for d in ready:
         d.state = 'recording'
-        await _send(d.ws, {'type': 'start', 'trial': name, 'kind': kind, 'at': t.start_at})
+        await _send(d.ws, {'type': 'start', 'trial': name, 'kind': kind, 'at': t.start_at,
+                           'fps': requested_fps})
     await _broadcast_status(s)
     return t.public()
 
@@ -429,17 +443,28 @@ def assemble_trial(s: Session, t: Trial) -> dict:
     pipeline's synchronizeVideos, as in OpenCap.
     """
     ups = {did: t.uploads[did] for did in t.devices}
+    # Every camera must end up at one frame rate. When phones ran at different
+    # rates, the faster ones keep every n-th frame down to the slowest; the
+    # slow ones are never padded with copies of their own frames.
+    rates = {did: media.nominal_fps(media.probe(u['path'])['fps']) for did, u in ups.items()}
+    fps = min(rates.values())
+    if len(set(rates.values())) > 1:
+        slow = sorted({f'Cam{s.devices[d].cam}' for d, r in rates.items() if r == fps})
+        t.warning = (f'Cameras ran at different frame rates ({", ".join(sorted({f"{r} fps" for r in rates.values()}))}); '
+                     f'all were reduced to {fps} fps to match {", ".join(slow)}.')
+    t.fps = fps
     common_start = max(u['started_at'] for u in ups.values())
     common_stop = min(u['stopped_at'] for u in ups.values())
     if common_stop - common_start < 0.5:
         raise media.VideoError('The phones did not record a common window of at least 0.5 s.')
-    report = {'common_start': common_start, 'duration_s': common_stop - common_start, 'cams': {}}
+    report = {'common_start': common_start, 'duration_s': common_stop - common_start,
+              'fps': fps, 'requested_fps': t.requested_fps, 'warning': t.warning, 'cams': {}}
     for did, u in ups.items():
         d = s.devices[did]
         dst = os.path.join(s.folder, 'Videos', f'Cam{d.cam}', 'InputMedia', t.name, t.name + '.mov')
         trim = common_start - u['started_at']
         info = media.normalize_video(u['path'], dst, trim_start_s=trim,
-                                     duration_s=common_stop - common_start)
+                                     duration_s=common_stop - common_start, fps=fps)
         report['cams'][f'Cam{d.cam}'] = {'trim_s': round(trim, 4), 'source': info,
                                          'model': d.model, 'clock_rtt_ms': d.clock_rtt_ms}
     with open(os.path.join(s.folder, 'Videos', f'{t.name}_capture.json'), 'w') as f:
