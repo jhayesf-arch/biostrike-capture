@@ -110,6 +110,11 @@ passes them to the command as arguments.
    solves the calibration from the checkerboard trial, then sizes the model
    from the neutral trial.
 
+**Control page on the server machine:** open `http://localhost:8000` there and
+start the server with the tunnel link, so the QR code still hands phones a link
+they can open:
+`CAPTURE_PUBLIC_URL=https://xxxx.trycloudflare.com uvicorn biostrike.capture_server.server:app --port 8000`
+
 **HTTPS is required.** Phones only allow camera access on `https://` pages.
 Run the server behind Render, `tailscale serve`, or a Cloudflare tunnel. Plain
 `http://localhost` works only on the computer itself.

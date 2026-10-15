@@ -64,10 +64,18 @@
 <script>
 const sid = location.pathname.split('/').pop();
 const key = new URLSearchParams(location.search).get('key') || '';
-const joinUrl = location.origin + '/join/' + sid;
-document.getElementById('join').textContent = joinUrl;
-try { new QRCode(document.getElementById('qr'), {text: joinUrl, width: 168, height: 168}); }
-catch (e) { document.getElementById('qr').textContent = 'QR unavailable; use the link.'; }
+// Phones join through the public https link. When this page is opened on the
+// server itself (http://localhost), that link comes from CAPTURE_PUBLIC_URL.
+fetch('/api/config').then(r => r.json()).catch(() => ({})).then(cfg => {
+  const local = ['localhost', '127.0.0.1'].includes(location.hostname);
+  const base = (local && cfg.public_url) ? cfg.public_url : location.origin;
+  const joinUrl = base + '/join/' + sid;
+  document.getElementById('join').textContent = joinUrl;
+  if (local && !cfg.public_url) document.getElementById('join').textContent +=
+    '  — phones cannot open a localhost link: restart the server with CAPTURE_PUBLIC_URL set to the tunnel link.';
+  try { new QRCode(document.getElementById('qr'), {text: joinUrl, width: 168, height: 168}); }
+  catch (e) { document.getElementById('qr').textContent = 'QR unavailable; use the link.'; }
+});
 
 let state = null, swingN = 1;
 const $ = id => document.getElementById(id);

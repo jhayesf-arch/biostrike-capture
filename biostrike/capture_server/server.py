@@ -56,6 +56,12 @@ STATIC = os.path.join(HERE, 'static')
 DATA_DIR = os.path.abspath(os.environ.get('BIOSTRIKE_CAPTURE_DATA',
                                           os.path.expanduser('~/biostrike-capture-data')))
 PASSCODE = os.environ.get('CAPTURE_PASSCODE', '')
+# The https address phones use (e.g. a cloudflared link). Lets the control page
+# run at http://localhost on the server itself and still hand phones a link
+# they can open.
+PUBLIC_URL = os.environ.get('CAPTURE_PUBLIC_URL', '').strip().rstrip('/')
+if PUBLIC_URL and not re.match(r'^https://[A-Za-z0-9.-]+(:\d+)?$', PUBLIC_URL):
+    raise SystemExit('CAPTURE_PUBLIC_URL must look like https://name.example.com')
 MAX_UPLOAD_BYTES = int(os.environ.get('CAPTURE_MAX_UPLOAD_MB', '1024')) * 1024 * 1024
 START_LEAD_S = 1.5       # phones get this long to schedule the start
 STOP_LEAD_S = 0.3
@@ -235,6 +241,11 @@ def camera_page(sid: str):
 @app.get('/api/models')
 def models():
     return available_models()
+
+
+@app.get('/api/config')
+def config():
+    return {'public_url': PUBLIC_URL, 'passcode_required': bool(PASSCODE)}
 
 
 @app.get('/api/time')
