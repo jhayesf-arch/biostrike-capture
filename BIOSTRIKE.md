@@ -81,9 +81,17 @@ and every connected phone records. No app install is needed; phones use a web
 page.
 
 ```bash
-pip install -r biostrike/requirements-capture.txt     # plus ffmpeg/ffprobe on PATH
-uvicorn biostrike.capture_server.server:app --host 0.0.0.0 --port 8000
+conda create -n biostrike python=3.11 -y
+conda activate biostrike
+pip install -r biostrike/requirements-capture.txt
+brew install ffmpeg
+uvicorn biostrike.capture_server.server:app --port 8000
 ```
+
+In a second terminal, `cloudflared tunnel --url http://localhost:8000` (after
+`brew install cloudflared`) prints a free `https://…trycloudflare.com` link that
+the phones can open. Commands here carry no trailing `# comments`: macOS's zsh
+passes them to the command as arguments.
 
 1. **Home page:** enter the athlete and the checkerboard size, then create a session.
    That opens the **control page**, which has a QR code. Keep the control link
@@ -168,9 +176,10 @@ of their folders they can't be matched back up.
 ```bash
 python biostrike/test_compare.py
 python biostrike/test_capture_local.py
-python biostrike/capture_server/test_capture_server.py    # needs ffmpeg + capture requirements
-python biostrike/test_calibration_synthetic.py            # needs ffmpeg + OpenCV 4.x
+python biostrike/capture_server/test_capture_server.py
+python biostrike/test_calibration_synthetic.py
 ```
 
-Neither needs TensorFlow, OpenSim or a GPU. The upstream pipeline call is
+The last two need ffmpeg and the capture requirements (OpenCV 4.x). The first two
+need neither TensorFlow, OpenSim nor a GPU. The upstream pipeline call is
 replaced with a stand-in, so they test our session handling, not Stanford's code.
