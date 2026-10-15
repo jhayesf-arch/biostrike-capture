@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Biostrike Capture</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <h1>Biostrike Capture</h1>
+  <p class="sub">Start a session, then scan the QR code with each phone.</p>
+  <form class="card" id="f">
+    <h2>Athlete</h2>
+    <label for="subject">Athlete ID</label>
+    <input id="subject" required pattern="[A-Za-z0-9_\-]{1,48}" placeholder="Quinn">
+    <div class="row">
+      <div><label for="lb">Weight (lb)</label><input id="lb" type="number" step="0.1" min="45" max="550" required></div>
+      <div><label for="ft">Height (ft)</label><input id="ft" type="number" min="3" max="7" required></div>
+      <div><label for="in">(in)</label><input id="in" type="number" min="0" max="11.9" step="0.1" value="0" required></div>
+    </div>
+    <h2 style="margin-top:18px">Checkerboard</h2>
+    <div class="row">
+      <div><label for="cols">Inner corners across</label><input id="cols" type="number" min="2" max="20" value="5" required></div>
+      <div><label for="rows">Inner corners down</label><input id="rows" type="number" min="2" max="20" value="4" required></div>
+      <div><label for="sq">Square size (mm)</label><input id="sq" type="number" min="10" max="300" step="0.1" value="35" required></div>
+    </div>
+    <p class="hint">Count corners where four squares meet. Measure a printed square with a ruler — printers rescale. Bigger squares calibrate more accurately.</p>
+    <div id="pc-wrap" hidden>
+      <label for="passcode">Passcode</label><input id="passcode" type="password" autocomplete="off">
+    </div>
+    <div class="actions"><button class="primary" type="submit">Create session</button>
+      <button type="button" id="show-pc">I have a passcode</button></div>
+    <div class="err" id="err"></div>
+  </form>
+</main>
+<script>
+document.getElementById('show-pc').onclick = () => { document.getElementById('pc-wrap').hidden = false; };
+document.getElementById('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const v = id => document.getElementById(id).value;
+  const body = {
+    subjectID: v('subject').trim(),
+    mass_kg: +(parseFloat(v('lb')) * 0.45359237).toFixed(2),
+    height_m: +((parseFloat(v('ft')) * 12 + parseFloat(v('in') || 0)) * 0.0254).toFixed(4),
+    board_cols: +v('cols'), board_rows: +v('rows'), square_mm: +v('sq'),
+    passcode: v('passcode'),
+  };
+  const r = await fetch('/api/sessions', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                          body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { document.getElementById('err').textContent = j.detail || 'Could not create session.'; return; }
+  location.href = j.control_url;
+};
+</script>
+</body>
+</html>

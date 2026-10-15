@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Capture Camera</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main id="root">
+  <h1 id="cam">Camera</h1>
+  <div class="card" id="setup">
+    <label for="model">Which iPhone is this?</label>
+    <select id="model"><option value="">Choose…</option></select>
+    <p class="hint">Settings → General → About shows the model name. The lens calibration
+      depends on it.</p>
+    <div class="actions"><button class="primary" id="b-start">Start camera</button></div>
+    <div class="err" id="err"></div>
+  </div>
+  <video id="v" class="cam-video" playsinline muted autoplay></video>
+  <div class="big-state" id="state">Not started</div>
+  <p class="hint" id="info"></p>
+</main>
+<script>
+const sid = location.pathname.split('/').pop();
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+function randomId() {
+  const a = new Uint8Array(12); crypto.getRandomValues(a);
+  return Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+}
+const deviceId = store.get('bs_dev_' + sid) || randomId();
+store.set('bs_dev_' + sid, deviceId);
+const now = () => (performance.timeOrigin + performance.now()) / 1000;   // phone clock, s
+
+let stream = null, ws = null, token = null, offset = null, settings = {};
+let recorder = null, chunks = [], startedAt = null, current = null, mimeType = '', wakeLock = null;
+
+function setState(text, recording) {
+  $('state').textContent = text;
+  $('root').classList.toggle('recording', !!recording);
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({type: 'state', state: text.toLowerCase().split(' ')[0]}));
+}
+
+fetch('/api/models').then(r => r.json()).then(models => {
+  const saved = store.get('bs_model');
+  for (const m of models) {
+    const o = document.createElement('option'); o.value = m.id; o.textContent = m.name;
+    if (m.id === saved) o.selected = true;
+    $('model').appendChild(o);
+  }
+});
+
+function pickMime() {
+  for (const t of ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm']) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+
+$('b-start').onclick = async () => {
+  $('err').textContent = '';
+  const model = $('model').value;
+  if (!model) { $('err').textContent = 'Choose the phone model first.'; return; }
+  store.set('bs_model', model);
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $('err').textContent = 'Camera access needs an https:// link.'; return;
+  }
+  // Ask in the orientation the phone is held. Asking for 1280x720 on an
+  // upright phone makes some browsers crop the sensor to fit, which changes
+  // the field of view the lens calibration was measured for.
+  const upright = window.innerHeight >= window.innerWidth;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: false, video: {
+      facingMode: {ideal: 'environment'},
+      width: {ideal: upright ? 720 : 1280}, height: {ideal: upright ? 1280 : 720},
+      frameRate: {ideal: 60}}});
+  } catch (e) { $('err').textContent = 'Camera blocked: ' + e.message; return; }
+  $('v').srcObject = stream;
+  const track = stream.getVideoTracks()[0];
+  settings = track.getSettings();
+  mimeType = pickMime();
+  $('info').textContent = `${settings.width}×${settings.height} @ ${Math.round(settings.frameRate || 0)} fps · ${mimeType || 'no recorder'}`;
+  if (settings.width > settings.height) $('info').textContent += ' · turn the phone upright';
+  else if (Math.abs(settings.width / settings.height - 9 / 16) > 0.01)
+    $('info').textContent += ' · camera image is cropped (not 16:9); recordings will be refused';
+  $('setup').hidden = true;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  connect();
+};
+
+function connect() {
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + `/ws/${sid}/camera/${deviceId}`);
+  ws.onopen = () => setState('Connecting');
+  ws.onmessage = e => handle(JSON.parse(e.data));
+  ws.onclose = () => { setState('Reconnecting…'); setTimeout(connect, 1500); };
+}
+
+// Clock offset (server − phone): the ping with the shortest round trip is the
+// one least distorted by network delay, so keep that sample.
+const pings = [];
+function syncClock() {
+  pings.length = 0;
+  let n = 0;
+  const tick = () => {
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({type: 'ping', t0: now()}));
+    if (++n < 12) setTimeout(tick, 120);
+  };
+  tick();
+}
+
+function handle(m) {
+  if (m.type === 'welcome') {
+    token = m.token;
+    $('cam').textContent = m.cam;
+    ws.send(JSON.stringify({type: 'hello', model: $('model').value || store.get('bs_model'),
+      label: m.cam, settings: {width: settings.width, height: settings.height,
+      frameRate: settings.frameRate, mimeType}}));
+    syncClock();
+    setInterval(syncClock, 30000);
+    setState('Ready');
+  } else if (m.type === 'pong') {
+    const t1 = now(), rtt = t1 - m.t0;
+    pings.push({rtt, offset: m.ts - (m.t0 + t1) / 2});
+    if (pings.length === 12) {
+      const best = pings.reduce((a, b) => (b.rtt < a.rtt ? b : a));
+      offset = best.offset;
+      ws.send(JSON.stringify({type: 'clock', offset_s: offset, rtt_ms: best.rtt * 1000}));
+    }
+  } else if (m.type === 'start') {
+    current = m.trial;
+    const delay = Math.max(0, (m.at - offset - now()) * 1000);
+    setState('Starting…');
+    setTimeout(begin, delay);
+  } else if (m.type === 'stop' && recorder && m.trial === current) {
+    const delay = Math.max(0, (m.at - offset - now()) * 1000);
+    setTimeout(() => recorder.state !== 'inactive' && recorder.stop(), delay);
+  }
+}
+
+function begin() {
+  chunks = [];
+  recorder = new MediaRecorder(stream, mimeType ? {mimeType, videoBitsPerSecond: 12e6} : {});
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstart = () => { startedAt = now() + offset; setState('● Recording ' + current, true); };
+  recorder.onstop = () => upload(now() + offset);
+  recorder.start(1000);
+}
+
+function upload(stoppedAt) {
+  const type = recorder.mimeType || mimeType || 'video/mp4';
+  const ext = type.includes('webm') ? '.webm' : '.mp4';
+  const fd = new FormData();
+  fd.append('device_id', deviceId); fd.append('token', token); fd.append('trial', current);
+  fd.append('started_at', String(startedAt)); fd.append('stopped_at', String(stoppedAt));
+  fd.append('file', new Blob(chunks, {type}), current + ext);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/api/sessions/${sid}/upload`);
+  xhr.upload.onprogress = e => e.lengthComputable && setState(`Uploading ${Math.round(100 * e.loaded / e.total)}%`);
+  xhr.onload = () => setState(xhr.status < 300 ? 'Ready' : 'Upload failed: ' + xhr.responseText.slice(0, 120));
+  xhr.onerror = () => setState('Upload failed — check the connection');
+  xhr.send(fd);
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && stream) {
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+});
+</script>
+</body>
+</html>

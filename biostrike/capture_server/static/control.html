@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture Control</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+<main>
+  <h1 id="title">Capture session</h1>
+  <p class="sub">Keep this page private: its link starts and stops recordings.</p>
+
+  <section class="card">
+    <h2>1 · Connect phones</h2>
+    <div class="qr-wrap">
+      <div id="qr"></div>
+      <div>
+        <p>Scan with each phone's camera, or open:</p>
+        <code id="join"></code>
+        <p class="hint">Mount phones upright (portrait) on tripods, about 3 m from the hitter
+          and 30–45° apart, both seeing the whole body.</p>
+      </div>
+    </div>
+    <table id="devices"><thead><tr><th>Camera</th><th>Phone</th><th>Video</th><th>Clock</th><th>State</th></tr></thead><tbody></tbody></table>
+    <p class="hint" id="dev-hint"></p>
+  </section>
+
+  <section class="card">
+    <h2>2 · Calibrate</h2>
+    <p class="hint" id="cal-hint">Hold the checkerboard upright, still and in view of every
+      phone, then press Calibrate. Re-do it if any phone moves.</p>
+    <p class="hint">Phones should see the board at an angle, not straight on: a flat board seen
+      head-on can't tell which way the camera tilts.</p>
+    <div class="actions"><button id="b-cal" class="primary">Calibrate (2 s)</button></div>
+  </section>
+
+  <section class="card">
+    <h2>3 · Neutral pose</h2>
+    <p class="hint">Athlete stands tall and still, feet hip-width, arms relaxed at the sides.
+      Used to size the body model.</p>
+    <div class="actions"><button id="b-neu" class="primary">Record neutral (3 s)</button></div>
+  </section>
+
+  <section class="card">
+    <h2>4 · Swings</h2>
+    <label for="tname">Trial name</label>
+    <input id="tname" pattern="[A-Za-z0-9_\-]{1,48}">
+    <div class="actions">
+      <button id="b-rec" class="rec">● Record</button>
+      <button id="b-stop" disabled>■ Stop</button>
+    </div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section class="card">
+    <h2>Recordings</h2>
+    <table id="trials"><thead><tr><th>Trial</th><th>Type</th><th>Status</th></tr></thead><tbody></tbody></table>
+    <p class="hint">Process on the GPU / processing machine:</p>
+    <code id="cmd"></code>
+  </section>
+</main>
+<script>
+const sid = location.pathname.split('/').pop();
+const key = new URLSearchParams(location.search).get('key') || '';
+const joinUrl = location.origin + '/join/' + sid;
+document.getElementById('join').textContent = joinUrl;
+try { new QRCode(document.getElementById('qr'), {text: joinUrl, width: 168, height: 168}); }
+catch (e) { document.getElementById('qr').textContent = 'QR unavailable; use the link.'; }
+
+let state = null, swingN = 1;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+$('tname').value = 'swing_1';
+
+function render() {
+  if (!state) return;
+  $('title').textContent = 'Capture · ' + (state.meta.subjectID || '');
+  const cb = state.meta.checkerBoard;
+  if (cb) $('cal-hint').textContent = `Hold the checkerboard (${cb.black2BlackCornersWidth_n}×${cb.black2BlackCornersHeight_n} inner corners, ${cb.squareSideLength_mm} mm squares) upright, still and in view of every phone, then press Calibrate. Re-do it if any phone moves.`;
+  const devs = state.devices;
+  $('devices').querySelector('tbody').innerHTML = devs.map(d => {
+    const st = d.settings || {};
+    const fps = st.frameRate ? Math.round(st.frameRate) : null;
+    const portrait = st.width && st.height ? st.height > st.width : null;
+    const cropped = st.width && st.height && Math.abs(Math.min(st.width, st.height) / Math.max(st.width, st.height) - 9 / 16) > 0.01;
+    const vid = st.width ? `${st.width}×${st.height} @ ${fps ?? '?'} fps` : '—';
+    const vcls = cropped ? 'bad' : (fps && fps < 59) || portrait === false ? 'warn' : 'ok';
+    const clock = d.clock_rtt_ms == null ? '<span class="warn">syncing…</span>'
+                : `<span class="${d.clock_rtt_ms > 80 ? 'warn' : 'ok'}">±${Math.round(d.clock_rtt_ms / 2)} ms</span>`;
+    return `<tr><td>${esc(d.cam)}</td><td>${esc(d.model ? d.model : 'choose model')} ${d.online ? '' : '<span class="bad">offline</span>'}</td>
+      <td class="${vcls}">${esc(vid)}${portrait === false ? ' · turn upright' : ''}${cropped ? ' · cropped, not 16:9' : ''}</td><td>${clock}</td><td>${esc(d.state)}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">No phones yet.</td></tr>';
+  const ready = devs.filter(d => d.online && d.model && d.clock_rtt_ms != null).length;
+  $('dev-hint').textContent = ready >= 2 ? `${ready} phones ready.` : 'Need at least 2 phones connected with their model chosen.';
+  const lowFps = devs.some(d => d.settings && d.settings.frameRate && d.settings.frameRate < 59);
+  if (lowFps) $('dev-hint').textContent += ' One or more phones record below 60 fps in the browser — fast swing phases will blur between frames.';
+
+  const trials = state.trials;
+  const recording = trials.find(t => t.status === 'recording');
+  const cal = trials.find(t => t.kind === 'calibration');
+  $('trials').querySelector('tbody').innerHTML = trials.map(t => {
+    const cls = t.status === 'ready' ? 'ok' : t.status === 'failed' ? 'bad' : 'warn';
+    const extra = t.status === 'uploading' ? ` (${t.uploaded.length}/${t.devices.length})` : '';
+    return `<tr><td>${esc(t.name)}</td><td>${esc(t.kind)}</td><td class="${cls}">${esc(t.status)}${extra}${t.error ? ' — ' + esc(t.error) : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="3" class="muted">Nothing recorded yet.</td></tr>';
+  const canRec = ready >= 2 && !recording;
+  $('b-cal').disabled = !canRec;
+  $('b-neu').disabled = !canRec;
+  $('b-rec').disabled = !canRec || !(cal && cal.status === 'ready');
+  $('b-stop').disabled = !recording;
+  const firstDyn = trials.find(t => t.kind === 'dynamic' && t.status === 'ready');
+  $('cmd').textContent = `python biostrike/capture_local.py --session "${state.session_folder}" --trial ${firstDyn ? firstDyn.name : '<trial>'} --rescale --workdir runs`;
+}
+
+function connect() {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host +
+                           `/ws/${sid}/control?key=${encodeURIComponent(key)}`);
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.type === 'status') { state = m; render(); } };
+  ws.onclose = () => setTimeout(connect, 1500);
+}
+connect();
+
+async function post(path, body) {
+  $('err').textContent = '';
+  const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify({key, ...body})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('err').textContent = j.detail || 'Request failed.'; return null; }
+  return j;
+}
+async function timed(kind, seconds) {
+  const t = await post(`/api/sessions/${sid}/trials`, {kind});
+  if (t) setTimeout(() => post(`/api/sessions/${sid}/trials/${t.name}/stop`, {}), (seconds + 1.5) * 1000);
+}
+$('b-cal').onclick = () => timed('calibration', 2);
+$('b-neu').onclick = () => timed('neutral', 3);
+$('b-rec').onclick = async () => {
+  const t = await post(`/api/sessions/${sid}/trials`, {kind: 'dynamic', name: $('tname').value.trim()});
+  if (t) { swingN += 1; $('tname').value = 'swing_' + swingN; }
+};
+$('b-stop').onclick = () => {
+  const t = state && state.trials.find(x => x.status === 'recording');
+  if (t) post(`/api/sessions/${sid}/trials/${t.name}/stop`, {});
+};
+</script>
+</body>
+</html>

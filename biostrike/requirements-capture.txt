@@ -1,0 +1,10 @@
+# Capture server (biostrike/capture_server). Install on top of requirements.txt.
+fastapi>=0.110
+uvicorn[standard]>=0.29      # [standard] brings the WebSocket support the phones need
+python-multipart>=0.0.9
+pyyaml>=6.0
+# OpenCV 5 returns checkerboard corners as (N, 2) instead of (N, 1, 2), which
+# breaks OpenCap's calibration code (utilsChecker.calcExtrinsics). Upstream pins
+# 4.5.1, too old for current Python/NumPy; the last 4.x works.
+opencv-python-headless>=4.10,<5
+# Also needs ffmpeg and ffprobe on PATH.

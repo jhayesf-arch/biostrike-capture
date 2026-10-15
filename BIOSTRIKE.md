@@ -74,6 +74,74 @@ step that needs an NVIDIA GPU, and it is the second half of the acceptance test.
 Run `--check-only` first: it lists anything missing from the session folder
 without running anything.
 
+## Recording with our own phones (capture server)
+
+`biostrike/capture_server` replaces OpenCap's recording flow: press Record once
+and every connected phone records. No app install is needed; phones use a web
+page.
+
+```bash
+pip install -r biostrike/requirements-capture.txt     # plus ffmpeg/ffprobe on PATH
+uvicorn biostrike.capture_server.server:app --host 0.0.0.0 --port 8000
+```
+
+1. **Home page:** enter the athlete and the checkerboard size, then create a session.
+   That opens the **control page**, which has a QR code. Keep the control link
+   private: it starts and stops recordings.
+2. **Each phone** scans the QR code, picks its iPhone model and taps Start camera.
+   Phones must be mounted upright (portrait). The control page lists every
+   phone with its resolution, frame rate and clock-sync accuracy.
+3. Press **Calibrate**: hold the checkerboard still, seen *at an angle* by
+   every phone. Then press **Neutral** with the athlete standing still, then
+   **Record / Stop** for each swing.
+4. Each phone uploads its clip. The server trims the clips to a shared window,
+   converts them to the exact video layout of OpenCap's iPhone app, and files
+   them into a session folder (`~/biostrike-capture-data/Data/BiostrikeSession_<id>`).
+   Process that folder with the command the control page shows:
+   `capture_local.py --session <folder> --trial swing_1 --rescale`. This first
+   solves the calibration from the checkerboard trial, then sizes the model
+   from the neutral trial.
+
+**HTTPS is required.** Phones only allow camera access on `https://` pages.
+Run the server behind Render, `tailscale serve`, or a Cloudflare tunnel. Plain
+`http://localhost` works only on the computer itself.
+
+**Sync:** the server tells every phone to start at the same server time. Each
+phone measures its own clock offset first, so the phones start within a few
+frames of each other. The pipeline's own `synchronizeVideos` then aligns them
+to the frame from the body motion, exactly as OpenCap does. No clap or audio
+is needed.
+
+**Access:** session links are unguessable. The camera link can only join and
+upload that phone's own clips. Start/stop needs the control key. Set
+`CAPTURE_PASSCODE` to require a passcode before anyone can create a session.
+Sessions live in memory; the recorded files persist, but restarting the server
+ends live sessions.
+
+### Validated
+
+- Real-browser run (Chromium, two fake portrait cameras plus a control page):
+  join, clock sync, calibrate → neutral → record → stop, uploads, conversion.
+- Calibration round trip: a checkerboard rendered through the iPhone X lens
+  model, recorded the way a browser does and converted, then solved by
+  OpenCap's own code. The camera came back 2–39 mm from its true position at
+  1.3–2 m (≤2% of distance). A full two-camera `main.py` calibration run on
+  such a session put both cameras within 8 and 21 mm.
+- Viewed exactly head-on, a flat board is ambiguous: the two candidate solutions
+  sit about ±240 mm either side of the truth at 1.5 m. Angle the phones to the board.
+
+### Not yet tested on real iPhones
+
+- **Frame rate.** Browsers may give 30 fps instead of 60, and the control page
+  warns when they do. If iPhones won't give 60 fps in the browser, the next
+  step is a native app talking to this same server.
+- **Field of view.** Whether Safari's camera image is the same, uncropped
+  field of view that the deployed lens calibrations were measured on. The
+  server refuses anything that isn't 16:9, and calibration accuracy on a real
+  session will confirm the rest.
+- **Pose detection.** It still needs MMPose installed (GPU, or slow on CPU)
+  before these sessions produce `.mot` files.
+
 ## Requirements
 
 - Python dependencies from `requirements.txt` (TensorFlow for the marker augmenter)
@@ -100,6 +168,8 @@ of their folders they can't be matched back up.
 ```bash
 python biostrike/test_compare.py
 python biostrike/test_capture_local.py
+python biostrike/capture_server/test_capture_server.py    # needs ffmpeg + capture requirements
+python biostrike/test_calibration_synthetic.py            # needs ffmpeg + OpenCV 4.x
 ```
 
 Neither needs TensorFlow, OpenSim or a GPU. The upstream pipeline call is

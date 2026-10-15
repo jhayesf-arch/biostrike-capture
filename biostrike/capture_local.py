@@ -21,9 +21,10 @@ Choices this wrapper enforces:
                    tree, so OpenCap's own .trc/.mot in the copy stay intact as the
                    reference for compare_to_opencap.py.
 
-  Calibration is reused from the download (cameraIntrinsicsExtrinsics.pickle per
-  camera) rather than recomputed; re-running the checkerboard trial is out of scope
-  for this first acceptance step.
+  Calibration is reused when the session has it (cameraIntrinsicsExtrinsics.pickle
+  per camera, as in an OpenCap download). Sessions recorded with our own capture
+  server have a "calibration" checkerboard trial instead; it is solved first,
+  with OpenCap's own extrinsics code, before any other trial.
 
 --reuse-opencap-keypoints seeds the pose-detector cache with the keypoints OpenCap
 already computed (Videos/Cam*/OutputPkl/<trial>_keypoints.pkl). main.py skips
@@ -57,6 +58,7 @@ BBOX_THR = 0.8                       # main.py's default; also names the cache f
 OUTPUT_SUFFIX = 'biostrike'          # markerDataFolderNameSuffix for our outputs
 POSE_DETECTOR = 'mmpose'
 VIDEO_EXTS = ('.mov', '.mp4', '.avi')
+CALIBRATION_TRIAL = 'calibration'
 
 
 # ── Session preparation (pure file work, no pipeline imports) ──────────────
@@ -72,6 +74,11 @@ def trial_video(cam_dir: str, trial: str) -> Optional[str]:
         if os.path.exists(p):
             return p
     return None
+
+
+def needs_calibration(session_dir: str) -> bool:
+    return any(not os.path.exists(os.path.join(cam, 'cameraIntrinsicsExtrinsics.pickle'))
+               for cam in camera_dirs(session_dir))
 
 
 def output_dirs(session_dir: str) -> dict:
@@ -96,9 +103,10 @@ def preflight(session_dir: str, trial: str, rescale: bool, reuse_keypoints: bool
         name = os.path.basename(cam)
         if not trial_video(cam, trial):
             problems.append(f'{name}: no video at InputMedia/{trial}/{trial}.mov|.mp4')
-        if not os.path.exists(os.path.join(cam, 'cameraIntrinsicsExtrinsics.pickle')):
-            problems.append(f'{name}: cameraIntrinsicsExtrinsics.pickle is missing '
-                            '(re-running calibration is not supported yet).')
+        if not (os.path.exists(os.path.join(cam, 'cameraIntrinsicsExtrinsics.pickle'))
+                or trial_video(cam, CALIBRATION_TRIAL)):
+            problems.append(f'{name}: no calibration — neither cameraIntrinsicsExtrinsics.pickle '
+                            f'nor a "{CALIBRATION_TRIAL}" checkerboard video.')
         if reuse_keypoints and not os.path.exists(
                 os.path.join(cam, 'OutputPkl', f'{trial}_keypoints.pkl')):
             problems.append(f'{name}: OutputPkl/{trial}_keypoints.pkl is missing, '
@@ -113,6 +121,8 @@ def preflight(session_dir: str, trial: str, rescale: bool, reuse_keypoints: bool
                         'one from the neutral trial.')
     if shutil.which('ffmpeg') is None:
         problems.append('ffmpeg is not on PATH (main.py uses it to rotate videos).')
+    if needs_calibration(session_dir) and shutil.which('ffprobe') is None:
+        problems.append('ffprobe is not on PATH (calibration reads video length with it).')
     return problems
 
 
@@ -222,7 +232,8 @@ def compat_shims() -> None:
         scipy.signal.gaussian = gaussian
 
 
-def run_pipeline(workdir: str, session_name: str, trial: str, scale: bool) -> None:
+def run_pipeline(workdir: str, session_name: str, trial: str, scale: bool,
+                 extrinsics: bool = False) -> None:
     """Call upstream main.main() — imported lazily, since it pulls in TensorFlow,
     OpenSim and OpenCV, none of which the preparation steps need."""
     offline_environment()
@@ -240,7 +251,7 @@ def run_pipeline(workdir: str, session_name: str, trial: str, scale: bool) -> No
     opencap_main(session_name, trial, trial,
                  dataDir=os.path.abspath(workdir),
                  poseDetector=POSE_DETECTOR, bbox_thr=BBOX_THR,
-                 isDocker=False, scaleModel=scale,
+                 isDocker=False, scaleModel=scale, extrinsicsTrial=extrinsics,
                  genericFolderNames=False, markerDataFolderNameSuffix=OUTPUT_SUFFIX)
 
 
@@ -277,6 +288,14 @@ def main(argv=None) -> int:
         for p in seed_keypoint_cache(session_dir, args.trial):
             print('seeded keypoints:', os.path.relpath(p, session_dir))
     start = time.time()
+    if needs_calibration(session_dir):
+        print('calibrating cameras from the checkerboard trial…')
+        run_pipeline(args.workdir, session_name, CALIBRATION_TRIAL, scale=False, extrinsics=True)
+        missing = [os.path.basename(c) for c in camera_dirs(session_dir)
+                   if not os.path.exists(os.path.join(c, 'cameraIntrinsicsExtrinsics.pickle'))]
+        if missing:
+            print('Calibration failed for', ', '.join(missing))
+            return 3
     if args.rescale:
         if args.reuse_opencap_keypoints:
             seed_keypoint_cache(session_dir, args.neutral)
