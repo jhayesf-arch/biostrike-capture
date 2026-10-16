@@ -446,7 +446,7 @@ def assemble_trial(s: Session, t: Trial) -> dict:
     # Every camera must end up at one frame rate. When phones ran at different
     # rates, the faster ones keep every n-th frame down to the slowest; the
     # slow ones are never padded with copies of their own frames.
-    rates = {did: media.nominal_fps(media.probe(u['path'])['fps']) for did, u in ups.items()}
+    rates = {did: media.nominal_fps(media.probe(u['path'])['frame_rate']) for did, u in ups.items()}
     fps = min(rates.values())
     if len(set(rates.values())) > 1:
         slow = sorted({f'Cam{s.devices[d].cam}' for d, r in rates.items() if r == fps})

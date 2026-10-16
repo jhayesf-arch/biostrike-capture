@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import tempfile
 
-STANDARD_FPS = (24, 25, 30, 50, 60, 100, 120, 240)
+STANDARD_FPS = (30, 60, 120, 240)          # what iPhones record
 TARGET_DISPLAY_W, TARGET_DISPLAY_H = 720, 1280      # portrait, as displayed
 
 
@@ -65,7 +65,24 @@ def probe(path: str) -> dict:
     fps = float(num) / float(den or 1) if float(den or 1) else 0.0
     duration = float((meta.get('format') or {}).get('duration') or s.get('duration') or 0.0)
     return {'display_w': w, 'display_h': h, 'fps': fps, 'duration': duration,
-            'rotation': rotation}
+            'rotation': rotation, 'frame_rate': _median_frame_rate(exe, path) or fps}
+
+
+def _median_frame_rate(ffprobe: str, path: str) -> float:
+    """Rate from the typical gap between frames.
+
+    The average rate is misleading for browser recordings: they stutter for
+    the first frames, which drags a 2 s clip's average from 60 to ~54.
+    """
+    out = subprocess.run([ffprobe, '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+                          'packet=pts_time', '-of', 'csv=p=0', path],
+                         capture_output=True, text=True, check=False)
+    pts = sorted(float(x) for x in out.stdout.split() if x.replace('.', '', 1).isdigit())
+    gaps = [b - a for a, b in zip(pts, pts[1:]) if b > a]
+    if len(gaps) < 5:
+        return 0.0
+    gaps.sort()
+    return 1.0 / gaps[len(gaps) // 2]
 
 
 def nominal_fps(measured: float) -> int:
@@ -75,7 +92,7 @@ def nominal_fps(measured: float) -> int:
     if measured <= 0:
         raise VideoError('Could not read the frame rate of the recording.')
     best = min(STANDARD_FPS, key=lambda f: abs(f - measured))
-    return best if abs(best - measured) / best < 0.08 else int(round(measured))
+    return best if abs(best - measured) / best < 0.12 else int(round(measured))
 
 
 def normalize_video(src: str, dst: str, trim_start_s: float = 0.0,
@@ -86,7 +103,7 @@ def normalize_video(src: str, dst: str, trim_start_s: float = 0.0,
     n-th frame, used when cameras ran at different rates; a higher one is
     refused rather than inventing frames."""
     info = probe(src)
-    source_fps = nominal_fps(info['fps'])
+    source_fps = nominal_fps(info['frame_rate'])
     fps = fps or source_fps
     if fps > source_fps:
         raise VideoError(f'Cannot raise {source_fps} fps to {fps} fps without inventing frames.')
