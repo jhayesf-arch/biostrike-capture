@@ -150,6 +150,19 @@ ends live sessions.
 - Viewed exactly head-on, a flat board is ambiguous: the two candidate solutions
   sit about ±240 mm either side of the truth at 1.5 m. Angle the phones to the board.
 
+### iPhone app (120/240 fps)
+
+Safari cannot reach the iPhone's slow-motion camera modes; OpenCap's own app
+records 120/240 fps through AVFoundation. `biostrike/ios` is a native app for
+the same server: frame-exact start/stop from sensor timestamps, stabilization
+off, focus locked at calibration, model detected automatically. It builds free
+with an Apple ID; see `biostrike/ios/README.md`. Not yet compiled: written
+where no Xcode is available.
+
+The server keeps each camera's real frame rate (30/60/120/240). Cameras running
+at different rates are all reduced to the slowest by keeping every n-th frame;
+frames are never duplicated to raise a rate.
+
 ### First real-phone session (iPhone 14 + iPhone 11 Pro, Safari)
 
 - Recording, upload and conversion worked on both phones. Safari tagged some

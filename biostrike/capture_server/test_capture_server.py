@@ -44,6 +44,8 @@ def _join(ws, model=MODEL):
     assert welcome['type'] == 'welcome'
     ws.send_text(json.dumps({'type': 'hello', 'model': model, 'label': welcome['cam'],
                              'settings': {'width': 720, 'height': 1280, 'frameRate': 60}}))
+    ack = json.loads(ws.receive_text())
+    assert ack == {'type': 'hello_ack', 'model': model, 'model_supported': True}, ack
     ws.send_text(json.dumps({'type': 'ping', 't0': time.time()}))
     pong = json.loads(ws.receive_text())
     assert pong['type'] == 'pong'
@@ -193,6 +195,31 @@ def test_upload_rejects_unknown_phone_and_bad_names():
     assert r.status_code == 403
     r = client.post('/api/sessions', json={'subjectID': '../etc', 'mass_kg': 80, 'height_m': 1.8})
     assert r.status_code == 400
+
+
+def test_unsupported_phone_model_is_reported_back():
+    s = _new_session()
+    with client.websocket_connect(f"/ws/{s['sid']}/camera/phoneZZZZ0009") as ws:
+        json.loads(ws.receive_text())
+        ws.send_text(json.dumps({'type': 'hello', 'model': 'iPhone99,9', 'settings': {}}))
+        assert json.loads(ws.receive_text()) == {'type': 'hello_ack', 'model': '', 'model_supported': False}
+
+
+def test_native_app_file_layout_is_accepted_at_its_frame_rate():
+    """The iOS app writes 1280x720 sensor frames tagged to display upright in
+    portrait (the iPhone camera's own layout), at 120/240 fps."""
+    with tempfile.TemporaryDirectory() as d:
+        raw = os.path.join(d, 'raw.mov')
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+                        'testsrc2=size=1280x720:rate=120', '-t', '1.5', '-c:v', 'libx264',
+                        '-pix_fmt', 'yuv420p', raw], check=True)
+        app = os.path.join(d, 'app.mov')
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-display_rotation', '-90', '-i', raw,
+                        '-c', 'copy', app], check=True)
+        info = media.normalize_video(app, os.path.join(d, 'out.mov'))
+        assert (info['display_w'], info['display_h'], info['nominal_fps']) == (720, 1280, 120), info
+        out = media.probe(os.path.join(d, 'out.mov'))
+        assert (out['display_w'], out['display_h'], media.nominal_fps(out['frame_rate'])) == (720, 1280, 120), out
 
 
 def test_frame_rate_is_snapped_and_never_raised():

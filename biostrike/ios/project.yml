@@ -1,0 +1,30 @@
+# XcodeGen project definition for the Biostrike capture app.
+#   brew install xcodegen
+#   cd biostrike/ios && xcodegen
+#   open BiostrikeCapture.xcodeproj
+# See biostrike/ios/README.md for signing with a free Apple ID.
+name: BiostrikeCapture
+options:
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  BiostrikeCapture:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    settings:
+      base:
+        # Must be unique to your Apple ID when signing with a free Personal Team.
+        PRODUCT_BUNDLE_IDENTIFIER: com.CHANGE-ME.biostrikecapture
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Biostrike
+        INFOPLIST_KEY_NSCameraUsageDescription: "Biostrike records swings from this phone for motion analysis."
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIStatusBarHidden: YES

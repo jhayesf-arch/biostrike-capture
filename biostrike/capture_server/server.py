@@ -524,6 +524,9 @@ async def camera_ws(ws: WebSocket, sid: str, device_id: str):
                 reported = msg.get('settings') if isinstance(msg.get('settings'), dict) else {}
                 d.settings = {k: reported.get(k) for k in ('width', 'height', 'frameRate', 'mimeType')}
                 write_session_metadata(s)
+                # Tell the phone whether its model has a lens calibration; the
+                # native app reports its model itself, so this is its only check.
+                await _send(ws, {'type': 'hello_ack', 'model': d.model, 'model_supported': bool(d.model)})
                 await _broadcast_status(s)
             elif kind == 'state':
                 d.state = str(msg.get('state', ''))[:20]
