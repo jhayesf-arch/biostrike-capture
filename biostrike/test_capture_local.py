@@ -126,6 +126,31 @@ def test_full_run_keeps_reference_and_compares():
     assert status == 0
 
 
+def test_download_with_swapped_videos_is_re_paired_by_content():
+    """OpenCap downloads can hold each camera's video in the other camera's
+    folder. Our keypoints must follow the calibration they belong to."""
+    def person(x0):
+        pts = [[x0 + 3 * i, 400 + 20 * i, 0.9] for i in range(25)]
+        return [{'person_id': [0], 'pose_keypoints_2d': sum(pts, [])}]
+    with tempfile.TemporaryDirectory() as d:
+        s = _fake_session(d)
+        cams = cl.camera_dirs(s)
+        for cam, x0 in zip(cams, (100.0, 500.0)):          # OpenCap's own keypoints
+            with open(os.path.join(cam, 'OutputPkl', f'{TRIAL}_keypoints.pkl'), 'wb') as f:
+                pickle.dump([person(x0)] * 5, f)
+        for cam, x0 in zip(cams, (500.4, 100.2)):          # ours: videos were swapped
+            p = cl.pp_path(cam, TRIAL)
+            os.makedirs(os.path.dirname(p))
+            with open(p, 'wb') as f:
+                pickle.dump([person(x0)] * 5, f)
+        notes = cl.pair_with_download(s, TRIAL)
+        assert len(notes) == 2 and 'Cam0 video -> Cam1' in notes[0], notes
+        for cam, x0 in zip(cams, (100.2, 500.4)):
+            with open(cl.pp_path(cam, TRIAL), 'rb') as f:
+                assert pickle.load(f)[0][0]['pose_keypoints_2d'][0] == x0
+        assert cl.pair_with_download(s, TRIAL) == []        # already paired: no change
+
+
 if __name__ == '__main__':
     tests = [v for k, v in dict(globals()).items() if k.startswith('test_')]
     for fn in tests:

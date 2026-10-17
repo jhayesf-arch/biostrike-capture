@@ -47,12 +47,16 @@ import glob
 import os
 import pickletools
 import shutil
+import subprocess
 import sys
 import time
 from typing import List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+# Working directory for the pose subprocess: anywhere but the repo root, whose
+# mmpose/ folder would shadow the installed mmpose package.
+REPO_PARENT_SAFE = os.path.dirname(REPO)
 
 BBOX_THR = 0.8                       # main.py's default; also names the cache folder
 OUTPUT_SUFFIX = 'biostrike'          # markerDataFolderNameSuffix for our outputs
@@ -255,6 +259,73 @@ def run_pipeline(workdir: str, session_name: str, trial: str, scale: bool,
                  genericFolderNames=False, markerDataFolderNameSuffix=OUTPUT_SUFFIX)
 
 
+# ── Pose detection ─────────────────────────────────────────────────────────
+
+def pp_path(cam_dir: str, trial: str) -> str:
+    return os.path.join(cam_dir, f'OutputPkl_{POSE_DETECTOR}_{BBOX_THR}', trial,
+                        f'{trial}_rotated_pp.pkl')
+
+
+def run_pose(session_dir: str, trial: str, pose_python: str, weights: str,
+             device: str = 'cpu') -> List[str]:
+    """OpenCap's MMPose step on every camera, then its OpenPose-layout
+    post-processing, leaving the file main.py looks for so it skips detection.
+
+    The detector runs in its own interpreter (pose_python) because OpenCap's
+    pose stack pins PyTorch 1.9 / mmcv-full 1.3.17, which cannot share an
+    environment with the rest of the pipeline."""
+    offline_environment()
+    compat_shims()
+    if REPO not in sys.path:
+        sys.path.insert(0, REPO)
+    from utilsDetector import arrangeMMposePkl
+    written = []
+    for cam in camera_dirs(session_dir):
+        video = trial_video(cam, trial)
+        print(f'pose detection: {os.path.basename(cam)} {trial} on {device}…', flush=True)
+        subprocess.run([pose_python, os.path.join(HERE, 'pose_mmpose.py'), '--video', video,
+                        '--weights', weights, '--device', device], check=True, cwd=REPO_PARENT_SAFE)
+        raw = os.path.join(os.path.dirname(pp_path(cam, trial)), f'{trial}_rotated.pkl')
+        arrangeMMposePkl(raw, pp_path(cam, trial))
+        written.append(pp_path(cam, trial))
+    return written
+
+
+def pair_with_download(session_dir: str, trial: str) -> List[str]:
+    """Put each video's keypoints in the camera folder whose calibration they
+    belong to, judged by content against OpenCap's own keypoints.
+
+    In OpenCap session downloads the videos can sit in the other camera's
+    folder: in session 1276a1c0 the Cam0 video matched Cam1's keypoints (and
+    calibration) and vice versa, which also showed in swapped frame counts.
+    Folder names therefore cannot be trusted. Sessions without OpenCap
+    keypoints (our own captures) are left as they are."""
+    from compare_keypoints import load_pp, track_athlete
+    import numpy as np
+    cams = camera_dirs(session_dir)
+    refs = [os.path.join(c, 'OutputPkl', f'{trial}_keypoints.pkl') for c in cams]
+    if not all(os.path.exists(r) for r in refs):
+        return []
+    ours = [track_athlete(load_pp(pp_path(c, trial)))[:30] for c in cams]
+    theirs = [track_athlete(load_pp(r))[:30] for r in refs]
+    cost = np.array([[np.nanmedian(np.linalg.norm(o[:, :, :2] - t[:len(o), :, :2], axis=2))
+                      for t in theirs] for o in ours])
+    best = list(np.argmin(cost, axis=1))
+    if best == list(range(len(cams))) or sorted(best) != list(range(len(cams))):
+        return []
+    moved, staged = [], {}
+    for i, c in enumerate(cams):
+        with open(pp_path(c, trial), 'rb') as f:
+            staged[best[i]] = f.read()
+    for j, data in staged.items():
+        with open(pp_path(cams[j], trial), 'wb') as f:
+            f.write(data)
+    for i, j in enumerate(best):
+        moved.append(f'{os.path.basename(cams[i])} video -> {os.path.basename(cams[j])} '
+                     f'(median {cost[i, j]:.1f} px vs {cost[i, i]:.1f} px in its own folder)')
+    return moved
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> int:
@@ -264,12 +335,18 @@ def main(argv=None) -> int:
     ap.add_argument('--workdir', default='runs', help='where the working copy goes')
     ap.add_argument('--reuse-opencap-keypoints', action='store_true',
                     help="seed the pose cache with OpenCap's keypoints: no GPU needed")
+    ap.add_argument('--pose-python', help="interpreter with OpenCap's pose stack: runs pose "
+                    'detection here instead of reusing keypoints (see requirements-pose.txt)')
+    ap.add_argument('--weights', help='folder with the two MMPose .pth files (with --pose-python)')
+    ap.add_argument('--pose-device', default='cpu', help='cpu, or cuda:0 on an NVIDIA GPU')
     ap.add_argument('--rescale', action='store_true',
                     help='re-run model scaling from the neutral trial')
     ap.add_argument('--neutral', default='neutral', help='name of the neutral trial')
     ap.add_argument('--fresh', action='store_true', help='discard an existing working copy')
     ap.add_argument('--check-only', action='store_true', help='preflight only, do not run')
     args = ap.parse_args(argv)
+    if args.pose_python and not args.weights:
+        ap.error('--pose-python needs --weights')
 
     problems = preflight(args.session, args.trial, args.rescale,
                          args.reuse_opencap_keypoints, args.neutral)
@@ -288,6 +365,11 @@ def main(argv=None) -> int:
         for p in seed_keypoint_cache(session_dir, args.trial):
             print('seeded keypoints:', os.path.relpath(p, session_dir))
     start = time.time()
+    if args.pose_python:
+        for trial in ([args.neutral] if args.rescale else []) + [args.trial]:
+            run_pose(session_dir, trial, args.pose_python, args.weights, args.pose_device)
+            for note in pair_with_download(session_dir, trial):
+                print('re-paired keypoints:', note)
     if needs_calibration(session_dir):
         print('calibrating cameras from the checkerboard trial…')
         run_pipeline(args.workdir, session_name, CALIBRATION_TRIAL, scale=False, extrinsics=True)
