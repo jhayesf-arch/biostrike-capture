@@ -4,15 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Capture Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@700&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#0b1220">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <main>
+  <a class="brand" href="/">Biostrike</a>
   <h1 id="title">Capture session</h1>
   <p class="sub">Keep this page private: its link starts and stops recordings.</p>
 
   <section class="card">
-    <h2>1 · Connect phones</h2>
+    <h2>Connect phones</h2>
     <div class="qr-wrap">
       <div id="qr"></div>
       <div>
@@ -28,7 +33,7 @@
   </section>
 
   <section class="card">
-    <h2>2 · Calibrate</h2>
+    <h2>Calibrate</h2>
     <p class="hint" id="cal-hint">Hold the checkerboard upright, still and in view of every
       phone, then press Calibrate. Re-do it if any phone moves.</p>
     <p class="hint">Phones should see the board at an angle, not straight on: a flat board seen
@@ -37,14 +42,14 @@
   </section>
 
   <section class="card">
-    <h2>3 · Neutral pose</h2>
+    <h2>Neutral pose</h2>
     <p class="hint">Athlete stands tall and still, feet hip-width, arms relaxed at the sides.
       Used to size the body model.</p>
     <div class="actions"><button id="b-neu" class="primary">Record neutral (3 s)</button></div>
   </section>
 
   <section class="card">
-    <h2>4 · Swings</h2>
+    <h2>Swings</h2>
     <div class="row">
       <div><label for="tname">Trial name</label>
         <input id="tname" pattern="[A-Za-z0-9_\-]{1,48}"></div>
@@ -112,7 +117,7 @@ function render() {
   const ready = devs.filter(d => d.online && d.model && d.clock_rtt_ms != null).length;
   $('dev-hint').textContent = ready >= 2 ? `${ready} phones ready.` : 'Need at least 2 phones connected with their model chosen.';
   const lowFps = devs.some(d => d.settings && d.settings.frameRate && d.settings.frameRate < 59);
-  if (lowFps) $('dev-hint').textContent += ' One or more phones record below 60 fps in this browser. Its frames get doubled to 60 fps, so it sees half as much of the swing — use phones that show 60 fps.';
+  if (lowFps) $('dev-hint').textContent += ' One or more phones record below 60 fps in this browser. Its frames get doubled to 60 fps, so it sees half as much of the swing, use phones that show 60 fps.';
 
   const trials = state.trials;
   const recording = trials.find(t => t.status === 'recording');
@@ -122,7 +127,7 @@ function render() {
     const extra = t.status === 'uploading' ? ` (${t.uploaded.length}/${t.devices.length})` : '';
     const rate = t.fps ? ` · ${t.fps} fps` : '';
     const warn = t.warning ? `<div class="warn">${esc(t.warning)}</div>` : '';
-    return `<tr><td>${esc(t.name)}</td><td>${esc(t.kind)}</td><td class="${cls}">${esc(t.status)}${extra}${rate}${t.error ? ' — ' + esc(t.error) : ''}${warn}</td></tr>`;
+    return `<tr><td>${esc(t.name)}</td><td>${esc(t.kind)}</td><td class="${cls}">${esc(t.status)}${extra}${rate}${t.error ? ', ' + esc(t.error) : ''}${warn}</td></tr>`;
   }).join('') || '<tr><td colspan="3" class="muted">Nothing recorded yet.</td></tr>';
   const canRec = ready >= 2 && !recording;
   $('b-cal').disabled = !canRec;

@@ -4,12 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Biostrike Capture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@700&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#0b1220">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <main>
-  <h1>Biostrike Capture</h1>
-  <p class="sub">Start a session, then scan the QR code with each phone.</p>
+  <a class="brand" href="/">Biostrike</a>
+  <h1>Start a capture</h1>
+  <p class="sub">Enter the athlete and the board you are using. Then scan the code on the next screen with each phone.</p>
   <form class="card" id="f">
     <h2>Athlete</h2>
     <label for="subject">Athlete ID</label>
@@ -25,7 +30,7 @@
       <div><label for="rows">Inner corners down</label><input id="rows" type="number" min="2" max="20" value="4" required></div>
       <div><label for="sq">Square size (mm)</label><input id="sq" type="number" min="10" max="300" step="0.1" value="35" required></div>
     </div>
-    <p class="hint">Count corners where four squares meet. Measure a printed square with a ruler — printers rescale. Bigger squares calibrate more accurately.</p>
+    <p class="hint">Count corners where four squares meet. Measure a printed square with a ruler, printers rescale. Bigger squares calibrate more accurately.</p>
     <div id="pc-wrap" hidden>
       <label for="passcode">Passcode</label><input id="passcode" type="password" autocomplete="off">
     </div>

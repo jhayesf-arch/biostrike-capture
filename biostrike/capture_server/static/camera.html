@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Capture Camera</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@700&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#0b1220">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -30,7 +34,7 @@ const store = {
 };
 function randomId() {
   const a = new Uint8Array(12); crypto.getRandomValues(a);
-  return Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); // taste-skill-ignore: hex bytes of a device id
 }
 const deviceId = store.get('bs_dev_' + sid) || randomId();
 store.set('bs_dev_' + sid, deviceId);
@@ -170,7 +174,7 @@ function upload(stoppedAt) {
   xhr.open('POST', `/api/sessions/${sid}/upload`);
   xhr.upload.onprogress = e => e.lengthComputable && setState(`Uploading ${Math.round(100 * e.loaded / e.total)}%`);
   xhr.onload = () => setState(xhr.status < 300 ? 'Ready' : 'Upload failed: ' + xhr.responseText.slice(0, 120));
-  xhr.onerror = () => setState('Upload failed — check the connection');
+  xhr.onerror = () => setState('Upload failed, check the connection');
   xhr.send(fd);
 }
 
