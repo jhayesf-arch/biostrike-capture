@@ -74,6 +74,32 @@ step that needs an NVIDIA GPU, and it is the second half of the acceptance test.
 Run `--check-only` first: it lists anything missing from the session folder
 without running anything.
 
+## Pose detection without OpenCap (and without a GPU)
+
+`capture_local.py --pose-python <env>/bin/python --weights <dir>` runs OpenCap's own
+pose step (`utilsMMpose`: Faster R-CNN person boxes, then HRNet-W48 whole-body with
+DARK decoding and flip test, person threshold 0.8) in its pinned stack
+(`biostrike/requirements-pose.txt`). Only the device differs: CPU here.
+
+Result on Quinn_1_60fps (both cameras, whole trial, CPU, ~5–6 s/frame on 4 cores):
+
+| | Ours vs OpenCap |
+|---|---|
+| 2-D keypoints | median 0.13–0.17 px, 95th pct 0.8–1.0 px; 12 of ~17,800 points >10 px, all low-confidence wrists/elbows mid-swing (motion blur, two near-equal heatmap peaks) |
+| 3-D markers, full pipeline | median 1.8–2.0 mm (worst LWrist 25.6 mm) |
+| Joint angles, full pipeline | median 0.20° over 33 coordinates; worst arm_rot_l 4.2°, pro_sup_l 3.4°, elbow_flex_l 2.0° |
+
+The left-arm differences are the elbow-extension singularity described above: with
+OpenCap's exact keypoints the same coordinates differed by 13–18°, so they swing
+either way on sub-pixel input changes. Everything else reproduces OpenCap.
+
+**OpenCap downloads swap the camera folders' videos.** In session 1276a1c0 the video
+in `Videos/Cam0` belongs to `Cam1`'s keypoints and calibration, and vice versa (the
+frame counts are swapped too). Run without re-pairing, the full pipeline is nonsense
+(markers ~0.5 m off, angles 46° median). `pair_with_download` matches each video's
+keypoints to a calibration by content, using OpenCap's keypoints in the download;
+our own capture server's sessions are unaffected.
+
 ## Recording with our own phones (capture server)
 
 `biostrike/capture_server` replaces OpenCap's recording flow: press Record once
