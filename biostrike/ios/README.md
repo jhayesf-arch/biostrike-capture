@@ -45,8 +45,8 @@ You need a Mac with Xcode, the iPhone and a USB cable.
 4. Click the blue **BiostrikeCapture** project at the top left, then the
    **BiostrikeCapture** target → **Signing & Capabilities**:
    - **Team:** choose *Your Name (Personal Team)*.
-   - **Bundle Identifier:** change `CHANGE-ME` to something unique to you, e.g.
-     `com.jetthayes.biostrikecapture`.
+   - **Bundle Identifier:** leave `com.jhayesf.biostrikecapture`. Only if Xcode
+     says it is unavailable, add a suffix, e.g. `com.jhayesf.biostrikecapture2`.
 5. Plug in the iPhone and tap **Trust** on it. On the iPhone, turn on
    **Settings → Privacy & Security → Developer Mode** (it restarts).
 6. In Xcode's top bar, pick your iPhone as the destination and press **▶︎** (Cmd+R).
@@ -75,8 +75,9 @@ needs the $99/year Apple Developer Program.
 
 ## Status
 
-Written against Apple's AVFoundation APIs but **not yet compiled**: the
-environment it was written in has no Xcode. If the first build shows errors,
-send them over. The server side it talks to is covered by
+**Compiles cleanly** for iOS 16+ (no errors or source warnings), checked on every
+push by `.github/workflows/ios-build.yml` on a GitHub macOS machine. Not yet
+run on a phone; if something misbehaves there, send the Xcode console output.
+The server side it talks to is covered by
 `capture_server/test_capture_server.py`, including a recording in exactly this
 app's file layout at 120 fps.

@@ -14,8 +14,8 @@ targets:
     sources: [Sources]
     settings:
       base:
-        # Must be unique to your Apple ID when signing with a free Personal Team.
-        PRODUCT_BUNDLE_IDENTIFIER: com.CHANGE-ME.biostrikecapture
+        # Must be unique worldwide; if Xcode says it is taken, add a suffix.
+        PRODUCT_BUNDLE_IDENTIFIER: com.jhayesf.biostrikecapture
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
