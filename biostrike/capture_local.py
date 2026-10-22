@@ -92,7 +92,7 @@ def output_dirs(session_dir: str) -> dict:
 
 
 def preflight(session_dir: str, trial: str, rescale: bool, reuse_keypoints: bool,
-              neutral: str = 'neutral') -> List[str]:
+              neutral: str = 'neutral', keypoints_detected: bool = False) -> List[str]:
     """Everything that would make main.py fail, as readable problems. [] = ready."""
     problems = []
     if not os.path.exists(os.path.join(session_dir, 'sessionMetadata.yaml')):
@@ -115,6 +115,12 @@ def preflight(session_dir: str, trial: str, rescale: bool, reuse_keypoints: bool
                 os.path.join(cam, 'OutputPkl', f'{trial}_keypoints.pkl')):
             problems.append(f'{name}: OutputPkl/{trial}_keypoints.pkl is missing, '
                             'so pose detection cannot be skipped.')
+        if keypoints_detected:
+            for t in ([neutral] if rescale else []) + [trial]:
+                if not os.path.exists(raw_path(cam, t)):
+                    problems.append(f'{name}: no detected keypoints for "{t}" '
+                                    f'({os.path.relpath(raw_path(cam, t), cam)}). Run '
+                                    'detect_session.py on a GPU (Colab notebook) first.')
     if rescale:
         for cam in cams:
             if not trial_video(cam, neutral):
@@ -220,6 +226,9 @@ def offline_environment() -> None:
     """
     os.environ.setdefault('API_TOKEN', 'offline-biostrike')
     os.environ.setdefault('API_URL', 'http://opencap-api.invalid/')
+    # The marker enhancer's models are Keras 2 JSON files; TensorFlow >= 2.16
+    # ships Keras 3, which cannot load them. tf_keras provides Keras 2.
+    os.environ.setdefault('TF_USE_LEGACY_KERAS', '1')
 
 
 def compat_shims() -> None:
@@ -278,15 +287,29 @@ def run_pose(session_dir: str, trial: str, pose_python: str, weights: str,
     compat_shims()
     if REPO not in sys.path:
         sys.path.insert(0, REPO)
-    from utilsDetector import arrangeMMposePkl
-    written = []
     for cam in camera_dirs(session_dir):
         video = trial_video(cam, trial)
         print(f'pose detection: {os.path.basename(cam)} {trial} on {device}…', flush=True)
         subprocess.run([pose_python, os.path.join(HERE, 'pose_mmpose.py'), '--video', video,
                         '--weights', weights, '--device', device], check=True, cwd=REPO_PARENT_SAFE)
-        raw = os.path.join(os.path.dirname(pp_path(cam, trial)), f'{trial}_rotated.pkl')
-        arrangeMMposePkl(raw, pp_path(cam, trial))
+    return arrange_detected(session_dir, trial)
+
+
+def raw_path(cam_dir: str, trial: str) -> str:
+    return os.path.join(os.path.dirname(pp_path(cam_dir, trial)), f'{trial}_rotated.pkl')
+
+
+def arrange_detected(session_dir: str, trial: str) -> List[str]:
+    """Convert raw MMPose keypoints, from run_pose here or from detect_session.py
+    on a GPU elsewhere (Colab), into the OpenPose layout main.py reads."""
+    offline_environment()
+    compat_shims()
+    if REPO not in sys.path:
+        sys.path.insert(0, REPO)
+    from utilsDetector import arrangeMMposePkl
+    written = []
+    for cam in camera_dirs(session_dir):
+        arrangeMMposePkl(raw_path(cam, trial), pp_path(cam, trial))
         written.append(pp_path(cam, trial))
     return written
 
@@ -339,6 +362,9 @@ def main(argv=None) -> int:
                     'detection here instead of reusing keypoints (see requirements-pose.txt)')
     ap.add_argument('--weights', help='folder with the two MMPose .pth files (with --pose-python)')
     ap.add_argument('--pose-device', default='cpu', help='cpu, or cuda:0 on an NVIDIA GPU')
+    ap.add_argument('--keypoints-detected', action='store_true',
+                    help='use keypoints already detected on a GPU elsewhere (detect_session.py, '
+                         'e.g. the Colab notebook) instead of running pose detection here')
     ap.add_argument('--rescale', action='store_true',
                     help='re-run model scaling from the neutral trial')
     ap.add_argument('--neutral', default='neutral', help='name of the neutral trial')
@@ -347,9 +373,10 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.pose_python and not args.weights:
         ap.error('--pose-python needs --weights')
+    offline_environment()     # before anything can import TensorFlow
 
     problems = preflight(args.session, args.trial, args.rescale,
-                         args.reuse_opencap_keypoints, args.neutral)
+                         args.reuse_opencap_keypoints, args.neutral, args.keypoints_detected)
     if problems:
         print('Not ready to run:')
         for p in problems:
@@ -365,9 +392,12 @@ def main(argv=None) -> int:
         for p in seed_keypoint_cache(session_dir, args.trial):
             print('seeded keypoints:', os.path.relpath(p, session_dir))
     start = time.time()
-    if args.pose_python:
+    if args.pose_python or args.keypoints_detected:
         for trial in ([args.neutral] if args.rescale else []) + [args.trial]:
-            run_pose(session_dir, trial, args.pose_python, args.weights, args.pose_device)
+            if args.keypoints_detected:
+                arrange_detected(session_dir, trial)
+            else:
+                run_pose(session_dir, trial, args.pose_python, args.weights, args.pose_device)
             for note in pair_with_download(session_dir, trial):
                 print('re-paired keypoints:', note)
     if needs_calibration(session_dir):

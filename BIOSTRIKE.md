@@ -20,6 +20,47 @@ git fetch upstream && git merge upstream/main
 | Pose detector | Defaults to OpenPose | **MMPose (HRNet) only**. OpenPose is licensed for non-commercial use. MMPose is also what OpenCap's own cloud uses (`posemodel: hrnet`) |
 | Outputs | Written into the session folder | Written to `MarkerData/mmpose_0.8/biostrike` and `OpenSimData/mmpose_0.8/biostrike` inside a *copy*, so OpenCap's originals stay as the reference |
 
+## Process a session on Google Colab (free GPU)
+
+The full path from recording to Swing Optimizer, with no GPU of your own:
+
+1. **Record** with the capture server or the iPhone app (calibration, neutral,
+   swings). The session is saved on the Mac in
+   `~/biostrike-capture-data/Data/<session>`.
+2. **Copy that whole folder to Google Drive**, e.g. `My Drive/Biostrike/sessions/<session>`.
+3. **Open the notebook** `biostrike/colab/Biostrike_pose_GPU.ipynb` in Colab:
+   colab.research.google.com → File → Open notebook → GitHub →
+   `jhayesf-arch/biostrike-capture`, branch `biostrike/local-capture`.
+4. **Runtime → Change runtime type → T4 GPU**, enter the session folder in
+   cell 1, then **Runtime → Run all**. About 10 minutes of setup, then 1–2
+   minutes per swing.
+5. **Upload** each folder in `My Drive/Biostrike/results/<session>/<swing>/`
+   (`.mot`, `.trc`, `LaiUhlrich2022_scaled.osim`) to the Swing Optimizer.
+
+The notebook runs two scripts, which also work anywhere else:
+
+```bash
+# GPU: pose detection on every camera and trial; finished trials are skipped,
+# so a run cut off by a disconnect resumes where it stopped.
+poseenv/bin/python biostrike/detect_session.py --session <session> --weights <dir> --device cuda:0
+
+# CPU: calibration, model scaling (if the session has none yet), sync,
+# triangulation, marker enhancer and OpenSim IK for every swing, then the
+# upload-ready files in <results>/<swing>/.
+pipeenv/bin/python biostrike/process_session.py --session <session> --results <results>
+```
+
+Environments: `requirements-pose-gpu.txt` (Python 3.8, PyTorch 1.9 CUDA 11.1)
+and `requirements-pipeline.txt` (Python 3.11, OpenSim 4.6). The second was
+verified by building it from scratch and running a full session; the first
+uses the same pins as the CPU pose environment with the GPU builds of torch and
+mmcv. `capture_local.py --keypoints-detected` runs one trial from keypoints
+detected elsewhere.
+
+Colab's free tier does not guarantee a GPU, disconnects after about 90 idle
+minutes, and is for running by hand: its terms do not allow using it as an
+always-on backend for the website.
+
 ## Phase 1 acceptance test: do we reproduce OpenCap?
 
 Take a session already processed by OpenCap, run it through this fork, and diff
