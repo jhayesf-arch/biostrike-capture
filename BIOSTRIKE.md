@@ -37,6 +37,20 @@ The full path from recording to Swing Optimizer, with no GPU of your own:
 5. **Upload** each folder in `My Drive/Biostrike/results/<session>/<swing>/`
    (`.mot`, `.trc`, `LaiUhlrich2022_scaled.osim`) to the Swing Optimizer.
 
+**Already processed on app.opencap.ai?** Choose *OpenCap session* in cell 1,
+paste the session link, and run all. It logs in (or reads the Colab secret
+`OPENCAP_TOKEN`), skips the GPU and pipeline steps, and saves each swing's
+`.mot`, `.trc` and scaled `.osim` into `My Drive/Biostrike/results/opencap_<id>/`.
+Outside Colab:
+
+```bash
+python biostrike/opencap_download.py <session link or id> --results <folder> [--trials swing_1]
+```
+
+It uses the same API endpoints as opencap-processing's `utils.py` (Apache 2.0),
+with only the standard library. The model keeps OpenCap's file name, so a
+`..._shoulder_scaled.osim` stays recognisable.
+
 The notebook runs two scripts, which also work anywhere else:
 
 ```bash

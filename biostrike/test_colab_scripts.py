@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capture_local as cl      # noqa: E402
 import detect_session as ds     # noqa: E402
 import process_session as ps    # noqa: E402
+import opencap_download as od   # noqa: E402
 
 
 def _session(root, trials=('swing_1', 'neutral', 'calibration'), cams=2, scaled=False):
@@ -99,6 +100,77 @@ def test_results_are_named_for_the_swing_optimizer():
         files = ps.collect(work, 'swing_1', os.path.join(root, 'results'))
         assert sorted(os.path.basename(p) for p in files.values()) == \
             ['LaiUhlrich2022_scaled.osim', 'swing_1.mot', 'swing_1.trc']
+    finally:
+        shutil.rmtree(root)
+
+
+SID = '0b3c1d2e-1111-4222-8333-444455556666'
+
+
+def _fake_opencap(ready=True):
+    """A fetch() standing in for api.opencap.ai and its signed storage links."""
+    calls = []
+    model = 'https://store/abc-LaiUhlrich2022_scaled.osim?sig=1'
+    api = {
+        f'sessions/{SID}/': {'isMono': False, 'trials': [
+            {'id': 't2', 'name': 'swing_1', 'created_at': '2026-01-02'},
+            {'id': 't1', 'name': 'neutral', 'created_at': '2026-01-01'},
+            {'id': 't0', 'name': 'calibration', 'created_at': '2026-01-01'},
+            {'id': 't3', 'name': 'swing_2', 'created_at': '2026-01-03'}]},
+        'trials/t1/': {'results': [{'tag': 'opensim_model', 'media': model},
+                                   {'tag': 'session_metadata', 'media': 'https://store/meta.yaml'}]},
+        'trials/t2/': {'status': 'done', 'results': [
+            {'tag': 'ik_results', 'media': 'https://store/s1.mot'},
+            {'tag': 'marker_data', 'media': 'https://store/s1.trc'}]},
+        'trials/t3/': {'status': 'done' if ready else 'processing', 'results': [
+            {'tag': 'ik_results', 'media': 'https://store/s2.mot'}] + (
+            [{'tag': 'marker_data', 'media': 'https://store/s2.trc'}] if ready else [])},
+    }
+
+    def fetch(url, token=None, data=None):
+        calls.append((url, token))
+        if url.startswith(od.API_URL):
+            assert token == 'tok', 'API calls must carry the token'
+            return __import__('json').dumps(api[url[len(od.API_URL):]]).encode()
+        assert token is None, 'storage links are signed; the token must not go there'
+        return url.encode()
+    return fetch, calls
+
+
+def test_opencap_session_id_from_link_or_id():
+    assert od.session_id_from(f'https://app.opencap.ai/session/{SID}') == SID
+    assert od.session_id_from(SID.upper()) == SID
+    try:
+        od.session_id_from('my session')
+        assert False
+    except ValueError:
+        pass
+
+
+def test_opencap_download_lays_out_swings_like_process_session():
+    root = tempfile.mkdtemp()
+    try:
+        fetch, calls = _fake_opencap()
+        rep = od.download(SID, root, 'tok', fetch=fetch)
+        assert list(rep) == ['swing_1', 'swing_2']           # recording order, no neutral/calibration
+        for t in rep:
+            assert sorted(os.listdir(os.path.join(root, t))) == \
+                ['LaiUhlrich2022_scaled.osim', f'{t}.mot', f'{t}.trc']
+        assert os.path.exists(os.path.join(root, 'sessionMetadata.yaml'))
+        # A second run downloads nothing again (resume after a disconnect).
+        n = sum(1 for u, _ in calls if u.startswith('https://store/'))
+        od.download(SID, root, 'tok', fetch=fetch)
+        assert sum(1 for u, _ in calls if u.startswith('https://store/')) == n
+    finally:
+        shutil.rmtree(root)
+
+
+def test_opencap_download_reports_unprocessed_trials_and_filters():
+    root = tempfile.mkdtemp()
+    try:
+        fetch, _ = _fake_opencap(ready=False)
+        rep = od.download(SID, root, 'tok', trials=['swing_2'], fetch=fetch)
+        assert list(rep) == ['swing_2'] and rep['swing_2']['missing'] == ['marker_data']
     finally:
         shutil.rmtree(root)
 
